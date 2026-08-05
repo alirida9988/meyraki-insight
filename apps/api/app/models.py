@@ -56,6 +56,9 @@ class Analysis(Base):
     floorplan_upload_id: Mapped[str] = mapped_column(String(32))
     footfall_upload_id: Mapped[str | None] = mapped_column(String(32), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    """Bumped by the runner per step; a 'running' row with a stale heartbeat is a crashed
+    run and may be atomically re-claimed (see pipeline.run_analysis / resume)."""
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     project: Mapped[Project] = relationship(back_populates="analyses")

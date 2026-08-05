@@ -6,10 +6,11 @@ Every output is validated against its contract before being stored — the "no b
 boundary exists from day one.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from pydantic import BaseModel
+from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 
 from meyraki_contracts import (
@@ -27,6 +28,7 @@ from meyraki_contracts import (
     PlanQuality,
     Point,
     QAVerdict,
+    ReportArtifact,
     Scenario,
     StepBudget,
     Track,
@@ -159,9 +161,9 @@ def step_business(ctx: Ctx) -> BusinessCase:
     )
 
 
-def step_report(ctx: Ctx) -> QAVerdict:
-    # M2: real step writes the report artifact; skeleton records a pass-through marker.
-    return QAVerdict(passed=True)
+def step_report(ctx: Ctx) -> ReportArtifact:
+    # M4: real step renders the branded PDF and stores its key.
+    return ReportArtifact(language="en", sections=["zones", "flow", "layout", "moodboard", "business"])
 
 
 def step_qa(ctx: Ctx) -> QAVerdict:
@@ -198,13 +200,49 @@ STEPS: dict[str, Callable[[Ctx], BaseModel]] = {
 }
 
 
+# A 'running' analysis whose heartbeat is older than this is considered crashed
+# and may be re-claimed by resume or another runner.
+STALE_AFTER = timedelta(minutes=5)
+
+
+def claimable_where(analysis_id: str, statuses: tuple[str, ...], now: datetime):
+    """WHERE clause matching an analysis that is safe to (re)claim: in one of the
+    given statuses, or 'running' with a stale/missing heartbeat (crashed worker)."""
+    return (
+        Analysis.id == analysis_id,
+        or_(
+            Analysis.status.in_(statuses),
+            and_(
+                Analysis.status == "running",
+                or_(
+                    Analysis.heartbeat_at.is_(None),
+                    Analysis.heartbeat_at < now - STALE_AFTER,
+                ),
+            ),
+        ),
+    )
+
+
 def run_analysis(session: Session, analysis_id: str) -> None:
-    """Execute pending steps in order; completed steps are skipped (resume-safe)."""
+    """Execute pending steps in order; completed steps are skipped (resume-safe).
+
+    The atomic UPDATE below is the concurrency lock: of N runners scheduled for the
+    same analysis (double-click, retry storm, resume race), exactly one sees
+    rowcount == 1 and executes; the rest return immediately.
+    """
+    now = _now()
+    claimed = session.execute(
+        update(Analysis)
+        .where(*claimable_where(analysis_id, ("queued",), now))
+        .values(status="running", heartbeat_at=now)
+    ).rowcount
+    session.commit()
+    if claimed != 1:
+        return
+    session.expire_all()
     analysis = session.get(Analysis, analysis_id)
     if analysis is None:
         return
-    analysis.status = "running"
-    session.commit()
     _emit(session, analysis.id, "pipeline", "Analysis started")
 
     ctx = Ctx(analysis)
@@ -215,6 +253,7 @@ def run_analysis(session: Session, analysis_id: str) -> None:
                 continue
             step.status = "running"
             step.started_at = _now()
+            analysis.heartbeat_at = _now()
             session.commit()
             _emit(session, analysis.id, "step", f"{step.name}: started")
 

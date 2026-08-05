@@ -213,6 +213,15 @@ class BusinessCase(BaseModel):
     """Every number ships with its assumptions — non-negotiable."""
 
 
+# ---------------------------------------------------------------- step 6: report
+
+class ReportArtifact(BaseModel):
+    report_key: str | None = None
+    """Object-storage key of the rendered PDF; None until the real writer lands (M4)."""
+    language: str = "en"
+    sections: list[str] = []
+
+
 # ---------------------------------------------------------------- step 7: QA
 
 class QAIssue(BaseModel):
@@ -237,6 +246,7 @@ ALL_CONTRACTS: dict[str, type[BaseModel]] = {
         LayoutProposals,
         Moodboard,
         BusinessCase,
+        ReportArtifact,
         QAVerdict,
     )
 }

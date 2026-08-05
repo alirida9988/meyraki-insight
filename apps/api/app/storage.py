@@ -19,3 +19,10 @@ def load(key: str) -> bytes:
     if not path.is_relative_to(settings.UPLOAD_DIR.resolve()):
         raise ValueError("invalid storage key")
     return path.read_bytes()
+
+
+def delete(key: str) -> None:
+    path = (settings.UPLOAD_DIR / key).resolve()
+    if not path.is_relative_to(settings.UPLOAD_DIR.resolve()):
+        raise ValueError("invalid storage key")
+    path.unlink(missing_ok=True)

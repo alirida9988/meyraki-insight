@@ -11,3 +11,4 @@ UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "var/uploads"))
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 FLOORPLAN_TYPES = {"image/png", "image/jpeg", "application/pdf"}
+FLOORPLAN_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"%PDF-")

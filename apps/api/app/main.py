@@ -1,6 +1,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
@@ -101,24 +102,36 @@ async def upload_file(
             raise HTTPException(
                 422, "Floorplan must be PNG, JPG, or PDF. DWG support arrives in Phase 2."
             )
+        # Trust boundary: verify contents, never the client-supplied content type.
+        if not data.startswith(settings.FLOORPLAN_MAGIC):
+            raise HTTPException(
+                422, "File contents are not a valid PNG, JPG, or PDF — re-export and try again."
+            )
     else:
         errors, rows = footfall.validate(data)
         if errors:
             raise HTTPException(422, detail={"errors": errors})
         meta["rows"] = rows
 
-    key = storage.save(data, Path(file.filename or "upload").suffix.lower() or ".bin")
+    # Display name only — storage uses a uuid key; DB column is varchar(300).
+    filename = (file.filename or "upload")[:200]
+    key = storage.save(data, Path(filename).suffix.lower()[:16] or ".bin")
     upload = Upload(
         project_id=project_id,
         kind=kind,
-        filename=file.filename or "upload",
-        content_type=file.content_type or "application/octet-stream",
+        filename=filename,
+        content_type=(file.content_type or "application/octet-stream")[:100],
         storage_key=key,
         size_bytes=len(data),
         meta=meta,
     )
     session.add(upload)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        storage.delete(key)  # never leave an orphaned file behind a failed DB write
+        raise HTTPException(422, "Upload could not be saved — check the file and try again.")
     return {"id": upload.id, "kind": kind, "filename": upload.filename, "meta": meta}
 
 
@@ -193,43 +206,66 @@ def get_analysis(analysis_id: str, session: Session = Depends(get_session)) -> d
 def resume_analysis(
     analysis_id: str, tasks: BackgroundTasks, session: Session = Depends(get_session)
 ) -> dict:
-    analysis = session.get(Analysis, analysis_id)
-    if analysis is None:
-        raise HTTPException(404, "Analysis not found")
-    if analysis.status not in ("failed", "queued"):
+    # Atomic claim: exactly one concurrent caller wins (rowcount == 1); a 'running'
+    # analysis is claimable only when its heartbeat is stale (crashed worker).
+    from sqlalchemy import update
+
+    from .pipeline import claimable_where
+
+    now = datetime.now(timezone.utc)
+    claimed = session.execute(
+        update(Analysis)
+        .where(*claimable_where(analysis_id, ("failed", "queued"), now))
+        .values(status="queued", error=None, heartbeat_at=None)
+    ).rowcount
+    session.commit()
+    if claimed != 1:
+        session.expire_all()
+        analysis = session.get(Analysis, analysis_id)
+        if analysis is None:
+            raise HTTPException(404, "Analysis not found")
         raise HTTPException(409, f"Analysis is {analysis.status} — nothing to resume")
+
+    session.expire_all()
+    analysis = session.get(Analysis, analysis_id)
     for s in analysis.steps:
         if s.status in ("running", "failed"):
             s.status = "pending"
             s.error = None
-    analysis.status = "queued"
-    analysis.error = None
     session.commit()
     tasks.add_task(_run_in_background, analysis.id)
     return {"id": analysis.id, "status": "queued"}
 
 
 @app.get("/analyses/{analysis_id}/events")
-async def stream_events(analysis_id: str) -> StreamingResponse:
+async def stream_events(
+    analysis_id: str, session: Session = Depends(get_session)
+) -> StreamingResponse:
     """SSE progress stream — polls the events table; fine for dev scale."""
+    if session.get(Analysis, analysis_id) is None:
+        raise HTTPException(404, "Analysis not found")
 
     async def gen():
         last_id = 0
         for _ in range(600):  # hard stop after ~5 min
-            with SessionLocal() as session:
-                events = session.scalars(
+            with SessionLocal() as s:
+                events = s.scalars(
                     select(Event)
                     .where(Event.analysis_id == analysis_id, Event.id > last_id)
                     .order_by(Event.id)
                 ).all()
-                status = session.get(Analysis, analysis_id)
+                analysis = s.get(Analysis, analysis_id)
                 for e in events:
                     last_id = e.id
                     payload = json.dumps({"kind": e.kind, "message": e.message})
                     yield f"data: {payload}\n\n"
-                if status is not None and status.status in ("done", "failed", "rejected"):
-                    yield f'data: {json.dumps({"kind": "end", "message": status.status})}\n\n'
+                if analysis is None:
+                    yield f'data: {json.dumps({"kind": "end", "message": "gone"})}\n\n'
+                    return
+                if analysis.status in ("done", "failed", "rejected"):
+                    yield f'data: {json.dumps({"kind": "end", "message": analysis.status})}\n\n'
                     return
             await asyncio.sleep(0.5)
+        yield f'data: {json.dumps({"kind": "end", "message": "timeout"})}\n\n'
 
     return StreamingResponse(gen(), media_type="text/event-stream")
