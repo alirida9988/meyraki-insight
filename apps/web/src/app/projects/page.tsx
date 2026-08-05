@@ -14,6 +14,27 @@ type Project = {
 
 type StepInfo = { name: string; status: string };
 
+type LayoutMove = { description: string; zone_ids: string[]; rationale: string };
+type ScenarioOut = {
+  id: string;
+  name: string;
+  moves: LayoutMove[];
+  predicted_effects: Record<string, string>;
+  confidence: number;
+};
+type MoodboardOut = {
+  style_name: string;
+  palette: string[];
+  materials: string[];
+  furniture_notes: string[];
+  lighting_concept: string | null;
+};
+type Results = {
+  scenarios: ScenarioOut[];
+  moodboard: MoodboardOut | null;
+  flowScore: number | null;
+};
+
 const SPACE_TYPES = ["hotel", "cafe", "restaurant", "coworking", "office", "clinic", "gallery", "other"];
 const OBJECTIVES = [
   { id: "guest_flow", label: "Maximize guest flow" },
@@ -64,6 +85,7 @@ export default function ProjectsPage() {
   const [steps, setSteps] = useState<StepInfo[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [heatmapKey, setHeatmapKey] = useState<string | null>(null);
+  const [results, setResults] = useState<Results | null>(null);
   const esRef = useRef<EventSource | null>(null);
   // Guards async responses against project switches mid-flight (review finding #2).
   const selectedIdRef = useRef<string | null>(null);
@@ -113,6 +135,7 @@ export default function ProjectsPage() {
     setSteps([]);
     setStatus(null);
     setHeatmapKey(null);
+    setResults(null);
   }
 
   async function createProject(e: React.FormEvent) {
@@ -175,6 +198,7 @@ export default function ProjectsPage() {
     setFeed([]);
     setSteps([]);
     setHeatmapKey(null);
+    setResults(null);
     setStatus("queued");
     let r: Response;
     try {
@@ -209,8 +233,14 @@ export default function ProjectsPage() {
         if (selectedIdRef.current !== pid) return;
         setStatus(detail.status);
         setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
-        const flowStep = detail.steps.find((s: { name: string }) => s.name === "flow");
-        setHeatmapKey(flowStep?.output?.heatmap_key ?? null);
+        const output = (name: string) =>
+          detail.steps.find((s: { name: string }) => s.name === name)?.output;
+        setHeatmapKey(output("flow")?.heatmap_key ?? null);
+        setResults({
+          scenarios: output("layout")?.scenarios ?? [],
+          moodboard: output("moodboard") ?? null,
+          flowScore: output("business")?.flow_efficiency_score ?? null,
+        });
         if (["done", "failed", "rejected"].includes(detail.status)) {
           stopPolling();
           esRef.current?.close();
@@ -426,6 +456,79 @@ export default function ProjectsPage() {
                     alt="Guest-flow heatmap over the uploaded floorplan"
                     className="mt-3 w-full rounded-sheet border border-hairline"
                   />
+                </div>
+              )}
+
+              {results && results.flowScore !== null && (
+                <div data-testid="flow-score">
+                  <DimLine label="Flow efficiency score" right="0 – 100" />
+                  <p className="mt-3 font-serif text-[40px] leading-none text-viridian">
+                    {results.flowScore}
+                  </p>
+                  <p className="mt-1 text-sm text-graphite">
+                    Area-weighted flow intensity across guest-facing zones. Assumptions
+                    ship with the report.
+                  </p>
+                </div>
+              )}
+
+              {results && results.scenarios.length > 0 && (
+                <div data-testid="scenarios">
+                  <DimLine label="Layout scenarios" right={`${results.scenarios.length}`} />
+                  <div className="mt-3 space-y-3">
+                    {results.scenarios.map((s) => (
+                      <div key={s.id} className="rounded-sheet border border-hairline bg-surface p-4">
+                        <div className="flex items-baseline justify-between">
+                          <h3 className="font-medium">{s.name}</h3>
+                          <span className="font-mono text-xs uppercase text-graphite">
+                            confidence {Math.round(s.confidence * 100)}%
+                          </span>
+                        </div>
+                        <ul className="mt-2 space-y-2">
+                          {s.moves.map((m, i) => (
+                            <li key={i} className="text-sm">
+                              <span className="font-medium">{m.description}</span>
+                              <span className="text-graphite"> — {m.rationale}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {Object.entries(s.predicted_effects).map(([k, v]) => (
+                            <span
+                              key={k}
+                              className="rounded-sheet border border-viridian px-2 py-1 font-mono text-xs text-viridian"
+                            >
+                              {k}: {v}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {results?.moodboard && (
+                <div data-testid="moodboard">
+                  <DimLine label="Moodboard" right={results.moodboard.style_name} />
+                  <div className="mt-3 flex gap-2">
+                    {results.moodboard.palette.map((hex) => (
+                      <div key={hex} className="flex-1">
+                        <div
+                          className="h-14 rounded-sheet border border-hairline"
+                          style={{ backgroundColor: hex }}
+                        />
+                        <p className="mt-1 font-mono text-[11px] uppercase text-graphite">{hex}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-sm">
+                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Materials · </span>
+                    {results.moodboard.materials.join(", ")}
+                  </p>
+                  {results.moodboard.lighting_concept && (
+                    <p className="mt-1 text-sm text-graphite">{results.moodboard.lighting_concept}</p>
+                  )}
                 </div>
               )}
             </div>

@@ -10,11 +10,17 @@ import anthropic
 from pydantic import BaseModel, Field
 
 from meyraki_contracts import (
+    FlowReport,
     FootfallStatus,
     IntakeManifest,
+    LayoutMove,
+    LayoutProposals,
+    Moodboard,
+    Objective,
     PlanKind,
     PlanQuality,
     Point,
+    Scenario,
     SpaceType,
     Zone,
     ZoneCategory,
@@ -25,6 +31,8 @@ from . import settings
 
 INTAKE_MODEL = "claude-haiku-4-5"
 ZONES_MODEL = "claude-sonnet-5"
+LAYOUT_MODEL = "claude-opus-5"
+MOODBOARD_MODEL = "claude-sonnet-5"
 
 _client: anthropic.Anthropic | None = None
 
@@ -209,3 +217,169 @@ def repair_zone_graph(wire: WireZoneGraph) -> ZoneGraph:
     entrances = [e for e in dict.fromkeys(entrances) if e in seen]
 
     return ZoneGraph(zones=zones, adjacency=adjacency, entrances=entrances)
+
+
+# ---------------------------------------------------------------- Layout Optimizer
+
+class WireMove(BaseModel):
+    description: str = Field(description="one concrete physical change")
+    zone_ids: list[str] = Field(description="ids of the zones this move touches")
+    rationale: str = Field(description="why, grounded in the flow data")
+
+
+class WireScenario(BaseModel):
+    id: str
+    name: str
+    moves: list[WireMove]
+    predicted_effects: dict[str, str] = Field(
+        description='metric -> effect, e.g. {"guest_flow": "+12% (est.)"}'
+    )
+    confidence: float
+
+
+class WireLayout(BaseModel):
+    scenarios: list[WireScenario] = Field(description="2-3 distinct scenarios")
+
+
+def _zone_brief(graph: ZoneGraph, flow: FlowReport) -> str:
+    from .geometry import polygon_area
+
+    intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
+    lines = []
+    for z in graph.zones:
+        share = round(polygon_area(z.polygon) * 100, 1)
+        lines.append(
+            f"- {z.id} ({z.category.value}, '{z.label}'): {share}% of plan area, "
+            f"flow intensity {intensity.get(z.id, 0.0)}"
+        )
+    lines.append(f"Adjacency: {graph.adjacency}")
+    lines.append(f"Entrances: {graph.entrances}")
+    lines.append(f"Bottlenecks: {flow.bottlenecks} | Dead zones: {flow.dead_zones}")
+    return "\n".join(lines)
+
+
+def run_layout(
+    graph: ZoneGraph,
+    flow: FlowReport,
+    objectives: list[Objective],
+    space_type: str,
+    brief: str | None,
+) -> LayoutProposals:
+    prompt = f"""You are the Layout Optimizer of a spatial-intelligence pipeline for
+hospitality interiors. Propose layout changes for this {space_type}.
+
+Zones and measured/simulated flow:
+{_zone_brief(graph, flow)}
+
+Client objectives: {", ".join(o.value for o in objectives)}
+Client brief: {brief or "(none)"}
+
+Produce 2-3 DISTINCT scenarios. Rules:
+- Each move is one concrete, physically actionable change ("relocate the reception desk
+  to the north wall of reception", "convert the dead lounge corner into a 6-seat
+  banquette"). No vague advice.
+- zone_ids must only use ids from the list above.
+- rationale must cite the flow data (bottleneck, dead zone, adjacency) that motivates it.
+- predicted_effects values are honest estimates and MUST carry their basis, e.g.
+  "+10-15% (est. from rebalancing lobby bottleneck)". Never a bare number.
+- Scenario ids: short snake_case. confidence in [0,1] per scenario.
+- Scenarios should differ in strategy (e.g. circulation-first vs revenue-first), not
+  be variations of one idea."""
+    wire: WireLayout = _parse(
+        LAYOUT_MODEL, 16000, [{"type": "text", "text": prompt}], WireLayout
+    )
+    return repair_layout(wire, graph, objectives)
+
+
+def repair_layout(
+    wire: WireLayout, graph: ZoneGraph, objectives: list[Objective]
+) -> LayoutProposals:
+    """Deterministic guarantee: every surviving move references real zones only.
+    # ponytail: geometric feasibility (OR-Tools clearances/capacity) lands with
+    # furniture-level data in Phase 2 — solver_feasible stays False until then.
+    """
+    valid_ids = {z.id for z in graph.zones}
+    scenarios: list[Scenario] = []
+    seen: set[str] = set()
+    for ws in wire.scenarios:
+        moves = [
+            LayoutMove(
+                description=m.description.strip(),
+                zone_ids=[z for z in (i.strip().lower().replace(" ", "_") for i in m.zone_ids) if z in valid_ids],
+                rationale=m.rationale.strip(),
+            )
+            for m in ws.moves
+            if m.description.strip()
+        ]
+        moves = [m for m in moves if m.zone_ids]
+        if not moves:
+            continue
+        sid = ws.id.strip().lower().replace(" ", "_") or f"scenario_{len(scenarios)}"
+        while sid in seen:
+            sid = f"{sid}_{len(scenarios)}"
+        seen.add(sid)
+        scenarios.append(
+            Scenario(
+                id=sid,
+                name=ws.name.strip() or sid,
+                moves=moves,
+                predicted_effects=ws.predicted_effects,
+                confidence=min(1.0, max(0.0, ws.confidence)),
+                solver_feasible=False,
+            )
+        )
+        if len(scenarios) == 3:
+            break
+    if not scenarios:
+        raise RuntimeError("Layout Optimizer produced no scenario with valid zone references")
+    return LayoutProposals(scenarios=scenarios, objectives=objectives)
+
+
+# ---------------------------------------------------------------- Moodboard Designer
+
+class WireMoodboard(BaseModel):
+    style_name: str
+    palette: list[str] = Field(description="4-6 hex colors like #1C4A3E, cohesive")
+    materials: list[str] = Field(description="3-6 physical materials")
+    furniture_notes: list[str] = Field(description="2-5 concrete furniture directions")
+    lighting_concept: str
+
+
+_HEX = __import__("re").compile(r"^#?[0-9a-fA-F]{6}$")
+
+
+def run_moodboard(
+    space_type: str, objectives: list[Objective], brief: str | None, graph: ZoneGraph
+) -> Moodboard:
+    zones = ", ".join(f"{z.label} ({z.category.value})" for z in graph.zones)
+    prompt = f"""You are the Moodboard Designer of a spatial-intelligence pipeline for
+hospitality interiors. Define a design direction for this {space_type}.
+
+Zones present: {zones}
+Client objectives: {", ".join(o.value for o in objectives)}
+Client brief: {brief or "(none)"}
+
+Rules:
+- style_name: a specific, evocative direction (not "modern" alone).
+- palette: 4-6 cohesive hex colors, ordered dominant -> accent.
+- materials: real, sourceable materials fitting the style and a hospitality budget.
+- furniture_notes: concrete directions a buyer could act on.
+- lighting_concept: one sentence, layered lighting for the key zones."""
+    wire: WireMoodboard = _parse(
+        MOODBOARD_MODEL, 4096, [{"type": "text", "text": prompt}], WireMoodboard
+    )
+    palette = []
+    for c in wire.palette:
+        c = c.strip()
+        if _HEX.match(c):
+            palette.append(c if c.startswith("#") else f"#{c}")
+    if len(palette) < 3:
+        raise RuntimeError(f"Moodboard Designer returned an unusable palette: {wire.palette}")
+    return Moodboard(
+        style_name=wire.style_name.strip(),
+        palette=palette[:6],
+        materials=[m.strip() for m in wire.materials if m.strip()][:6],
+        furniture_notes=[f.strip() for f in wire.furniture_notes if f.strip()][:5],
+        lighting_concept=wire.lighting_concept.strip() or None,
+        image_keys=[],  # image generation lands with the Gemini key (docs/04 §2)
+    )

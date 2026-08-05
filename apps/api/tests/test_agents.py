@@ -73,3 +73,66 @@ def test_symmetric_adjacency_deduped():
         )
     )
     assert graph.adjacency == [("a", "b")]
+
+
+# ---------------------------------------------------------------- layout repair
+
+from app.agents import WireLayout, WireMove, WireScenario, repair_layout
+from meyraki_contracts import Objective
+
+
+def _graph_two_zones():
+    from app.agents import WireZoneGraph
+    return repair_zone_graph(WireZoneGraph(zones=[_wz("lobby"), _wz("cafe")], adjacency=[], entrances=[]))
+
+
+def _ws(sid, zone_ids, name="Scenario"):
+    return WireScenario(
+        id=sid,
+        name=name,
+        moves=[WireMove(description="Move the desk", zone_ids=zone_ids, rationale="bottleneck")],
+        predicted_effects={"guest_flow": "+10% (est.)"},
+        confidence=0.7,
+    )
+
+
+def test_layout_moves_with_unknown_zones_dropped():
+    graph = _graph_two_zones()
+    wire = WireLayout(scenarios=[_ws("a", ["lobby", "ghost"]), _ws("b", ["ghost"])])
+    result = repair_layout(wire, graph, [Objective.GUEST_FLOW])
+    assert [s.id for s in result.scenarios] == ["a"]
+    assert result.scenarios[0].moves[0].zone_ids == ["lobby"]
+    assert result.scenarios[0].solver_feasible is False
+
+
+def test_layout_all_invalid_raises():
+    import pytest as _pytest
+    graph = _graph_two_zones()
+    with _pytest.raises(RuntimeError):
+        repair_layout(WireLayout(scenarios=[_ws("a", ["ghost"])]), graph, [Objective.GUEST_FLOW])
+
+
+def test_layout_caps_at_three_scenarios():
+    graph = _graph_two_zones()
+    wire = WireLayout(scenarios=[_ws(f"s{i}", ["lobby"]) for i in range(5)])
+    assert len(repair_layout(wire, graph, [Objective.GUEST_FLOW]).scenarios) == 3
+
+
+# ---------------------------------------------------------------- business math
+
+def test_flow_efficiency_score_excludes_back_of_house():
+    from app.flow import simulated
+    from app.pipeline import flow_efficiency_score
+    from app.agents import WireZoneGraph
+
+    graph = repair_zone_graph(WireZoneGraph(
+        zones=[
+            _wz("lobby", category="lobby", points=[(0, 0), (0.5, 0), (0.5, 1), (0, 1)]),
+            _wz("kitchen", category="kitchen", points=[(0.5, 0), (1, 0), (1, 1), (0.5, 1)]),
+        ],
+        adjacency=[WireAdjacency(a="lobby", b="kitchen")],
+        entrances=["lobby"],
+    ))
+    flow = simulated(graph)  # lobby=1.0, kitchen=0.75
+    # kitchen is back-of-house -> score reflects lobby only
+    assert flow_efficiency_score(graph, flow) == 100.0

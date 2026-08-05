@@ -8,3 +8,8 @@ __pycache__/
 !.env.example
 dist/
 .DS_Store
+test-results/
+playwright-report/
+apps/web/e2e/results-*.png
+apps/api/test_meyraki.db
+apps/api/var/

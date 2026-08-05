@@ -159,6 +159,16 @@ def step_flow(ctx: Ctx) -> FlowReport:
 
 def step_layout(ctx: Ctx) -> LayoutProposals:
     objectives = [Objective(o) for o in ctx.analysis.objectives] or [Objective.GUEST_FLOW]
+    if settings.agents_enabled():
+        from . import agents
+
+        return agents.run_layout(
+            ZoneGraph.model_validate(ctx.outputs["zones"]),
+            FlowReport.model_validate(ctx.outputs["flow"]),
+            objectives,
+            ctx.analysis.project.space_type,
+            ctx.analysis.brief,
+        )
     return LayoutProposals(
         objectives=objectives,
         scenarios=[
@@ -178,6 +188,16 @@ def step_layout(ctx: Ctx) -> LayoutProposals:
 
 
 def step_moodboard(ctx: Ctx) -> Moodboard:
+    if settings.agents_enabled():
+        from . import agents
+
+        objectives = [Objective(o) for o in ctx.analysis.objectives] or [Objective.GUEST_FLOW]
+        return agents.run_moodboard(
+            ctx.analysis.project.space_type,
+            objectives,
+            ctx.analysis.brief,
+            ZoneGraph.model_validate(ctx.outputs["zones"]),
+        )
     return Moodboard(
         style_name="Serene boutique",
         palette=["#FBFAF7", "#1C4A3E", "#B08D57"],
@@ -185,14 +205,60 @@ def step_moodboard(ctx: Ctx) -> Moodboard:
     )
 
 
+# Guest-facing zones drive the flow-efficiency score; back-of-house is excluded.
+BACK_OF_HOUSE = {
+    ZoneCategory.KITCHEN,
+    ZoneCategory.STORAGE,
+    ZoneCategory.SERVICE,
+    ZoneCategory.RESTROOM,
+    ZoneCategory.STAIRS,
+    ZoneCategory.ELEVATOR,
+}
+
+
+def flow_efficiency_score(graph: ZoneGraph, flow: FlowReport) -> float | None:
+    """Area-weighted mean flow intensity across guest-facing zones, on 0-100.
+    Deterministic math — the model never invents this number."""
+    from .geometry import polygon_area
+
+    intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
+    weighted = total = 0.0
+    for zone in graph.zones:
+        if zone.category in BACK_OF_HOUSE:
+            continue
+        area = polygon_area(zone.polygon)
+        weighted += area * intensity.get(zone.id, 0.0)
+        total += area
+    if total == 0:
+        return None
+    return round(100 * weighted / total, 1)
+
+
 def step_business(ctx: Ctx) -> BusinessCase:
-    return BusinessCase(
-        flow_efficiency_score=68,
-        assumptions=[Assumption(
-            statement="Boutique-hotel preset revenue baselines",
+    graph = ZoneGraph.model_validate(ctx.outputs["zones"])
+    flow = FlowReport.model_validate(ctx.outputs["flow"])
+    score = flow_efficiency_score(graph, flow)
+    assumptions = [
+        Assumption(
+            statement="Flow Efficiency Score = area-weighted mean flow intensity across "
+            "guest-facing zones (back-of-house excluded), scaled to 0-100.",
+            source="deterministic",
+        ),
+        Assumption(
+            statement=(
+                "Intensities are measured from uploaded footfall data."
+                if flow.track == Track.DATA_DRIVEN
+                else "Intensities are simulated (distance decay from entrances) — upload footfall data for measured values."
+            ),
+            source="pipeline",
+        ),
+        Assumption(
+            statement="Revenue-per-sqm projections require venue revenue baselines "
+            "(pending founder presets per space type) — not yet computed.",
             source="preset",
-        )],
-    )
+        ),
+    ]
+    return BusinessCase(flow_efficiency_score=score, assumptions=assumptions)
 
 
 def step_report(ctx: Ctx) -> ReportArtifact:
