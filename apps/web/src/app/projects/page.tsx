@@ -63,9 +63,20 @@ export default function ProjectsPage() {
   const [feed, setFeed] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepInfo[]>([]);
   const [status, setStatus] = useState<string | null>(null);
+  const [heatmapKey, setHeatmapKey] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   // Guards async responses against project switches mid-flight (review finding #2).
   const selectedIdRef = useRef<string | null>(null);
+  // Truth-poll while an analysis is busy — covers a permanently unreachable
+  // event stream (review residual R2): the server, not the stream, is authoritative.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
 
   function loadProjects() {
     setLoadState("loading");
@@ -80,12 +91,17 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     loadProjects();
-    return () => esRef.current?.close();
+    return () => {
+      esRef.current?.close();
+      stopPolling();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function selectProject(p: Project) {
     esRef.current?.close(); // never let another project's stream write here (finding #1)
     esRef.current = null;
+    stopPolling();
     setSelected(p);
     selectedIdRef.current = p.id;
     setPlanId(null);
@@ -96,6 +112,7 @@ export default function ProjectsPage() {
     setFeed([]);
     setSteps([]);
     setStatus(null);
+    setHeatmapKey(null);
   }
 
   async function createProject(e: React.FormEvent) {
@@ -157,6 +174,7 @@ export default function ProjectsPage() {
     setUploadErrors([]);
     setFeed([]);
     setSteps([]);
+    setHeatmapKey(null);
     setStatus("queued");
     let r: Response;
     try {
@@ -191,10 +209,21 @@ export default function ProjectsPage() {
         if (selectedIdRef.current !== pid) return;
         setStatus(detail.status);
         setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
+        const flowStep = detail.steps.find((s: { name: string }) => s.name === "flow");
+        setHeatmapKey(flowStep?.output?.heatmap_key ?? null);
+        if (["done", "failed", "rejected"].includes(detail.status)) {
+          stopPolling();
+          esRef.current?.close();
+        }
       } catch {
-        /* transient — the stream or a retry will resync */
+        /* transient — the stream, the poll, or a retry will resync */
       }
     };
+
+    // Safety net (residual R2): the server is the source of truth even if the
+    // event stream never connects. Cheap poll, cleared on terminal status.
+    stopPolling();
+    pollRef.current = setInterval(() => void syncFromServer(), 5000);
 
     const es = new EventSource(`${API}/analyses/${id}/events`);
     esRef.current = es;
@@ -385,6 +414,18 @@ export default function ProjectsPage() {
                       {s.name} · {s.status}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {heatmapKey && (
+                <div>
+                  <DimLine label="Flow heatmap" right="cool → hot" />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`${API}/files/${heatmapKey}`}
+                    alt="Guest-flow heatmap over the uploaded floorplan"
+                    className="mt-3 w-full rounded-sheet border border-hairline"
+                  />
                 </div>
               )}
             </div>

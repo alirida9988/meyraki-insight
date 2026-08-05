@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -259,14 +259,17 @@ def get_file(key: str) -> Response:
 
 @app.get("/analyses/{analysis_id}/events")
 async def stream_events(
-    analysis_id: str, session: Session = Depends(get_session)
+    analysis_id: str,
+    session: Session = Depends(get_session),
+    last_event_id: str | None = Header(None),
 ) -> StreamingResponse:
     """SSE progress stream — polls the events table; fine for dev scale."""
     if session.get(Analysis, analysis_id) is None:
         raise HTTPException(404, "Analysis not found")
 
     async def gen():
-        last_id = 0
+        # Resume from Last-Event-ID so browser reconnects don't replay the log.
+        last_id = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
         for _ in range(600):  # hard stop after ~5 min
             with SessionLocal() as s:
                 events = s.scalars(
@@ -278,7 +281,7 @@ async def stream_events(
                 for e in events:
                     last_id = e.id
                     payload = json.dumps({"kind": e.kind, "message": e.message})
-                    yield f"data: {payload}\n\n"
+                    yield f"id: {e.id}\ndata: {payload}\n\n"
                 if analysis is None:
                     yield f'data: {json.dumps({"kind": "end", "message": "gone"})}\n\n'
                     return
