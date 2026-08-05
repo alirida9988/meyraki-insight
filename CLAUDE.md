@@ -14,6 +14,11 @@ branded PDF report out. MENA/GCC launch focus, Arabic/RTL is a differentiator.
 - `docs/05-BUILD-PLAN.md` — phased implementation plan
 
 ## Rules
+- **Never claim "done/verified" from happy-path checks alone.** After every milestone
+  or substantial change, launch independent verification agents (backend/DB, frontend/
+  UX, pipeline/contracts) that actively try to break the work — kill mid-run, poison
+  inputs, race conditions, spoofed uploads, UI state bugs — and fix confirmed findings
+  before reporting completion. (Founder directive 2026-08-05 after a bug slipped through.)
 - The product name is **Meyraki Insight** (sometimes misheard as "Mirakel").
 - Agent pipeline outputs are typed JSON contracts validated at every step; never let a
   step consume unvalidated model output.

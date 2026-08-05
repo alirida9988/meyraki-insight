@@ -25,7 +25,8 @@ Reference altitude: Linear's discipline, Stripe's clarity, Aman Hotels' restrain
 | `hairline` | `#E7E4DC` | Rules, borders, dividers (1px, never heavier) |
 | `viridian` | `#1C4A3E` | THE accent: links, active states, focus rings, selected states, brand moments |
 | `viridian-tint` | `#EDF2EF` | Accent wash: selected backgrounds, hover fills |
-| `thermal` | `#DA4B22` | **Data only** — heat/activity in charts, bottleneck pins, alerts. Never decoration. |
+| `thermal` | `#DA4B22` | **Data only** — heat/activity in charts, bottleneck pins, alerts. Never decoration. Fails AA as small text — use `thermal-text` for words. |
+| `thermal-text` | `#C04117` | Text grade of thermal (≥5.0:1 on paper/surface) — error messages, failed-state labels. |
 | `thermal-ramp` | `#2C5F8A → #7FB069 → #E8C547 → #DA4B22` | Heatmap gradient (cool→hot) on plans |
 
 Rules: one accent per view. Viridian is brand; thermal is information. If a screen

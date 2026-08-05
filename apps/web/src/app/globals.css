@@ -10,6 +10,7 @@
   --viridian: #1c4a3e;
   --viridian-tint: #edf2ef;
   --thermal: #da4b22;
+  --thermal-text: #c04117; /* AA-compliant text grade of thermal (5.0:1+ on paper/surface) */
 }
 
 @theme inline {
@@ -21,6 +22,7 @@
   --color-viridian: var(--viridian);
   --color-viridian-tint: var(--viridian-tint);
   --color-thermal: var(--thermal);
+  --color-thermal-text: var(--thermal-text);
   --font-sans: var(--font-instrument-sans);
   --font-serif: var(--font-instrument-serif);
   --font-mono: var(--font-plex-mono);

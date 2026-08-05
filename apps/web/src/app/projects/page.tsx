@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -21,6 +22,20 @@ const OBJECTIVES = [
   { id: "ambiance", label: "Ambiance" },
 ];
 
+/** API `detail` payloads arrive as string | {errors: string[]} | pydantic array. */
+function detailToMessages(detail: unknown): string[] {
+  if (typeof detail === "string") return [detail];
+  if (Array.isArray(detail)) {
+    return detail.map((d) =>
+      d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : String(d)
+    );
+  }
+  if (detail && typeof detail === "object" && Array.isArray((detail as { errors?: unknown }).errors)) {
+    return (detail as { errors: string[] }).errors;
+  }
+  return ["Something went wrong — please try again."];
+}
+
 function DimLine({ label, right }: { label: string; right?: string }) {
   return (
     <div className="dim-line">
@@ -33,149 +48,229 @@ function DimLine({ label, right }: { label: string; right?: string }) {
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [selected, setSelected] = useState<Project | null>(null);
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [spaceType, setSpaceType] = useState("hotel");
+  const [createError, setCreateError] = useState<string | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
+  const [planName, setPlanName] = useState<string | null>(null);
   const [footfallId, setFootfallId] = useState<string | null>(null);
+  const [footfallName, setFootfallName] = useState<string | null>(null);
   const [objectives, setObjectives] = useState<string[]>(["guest_flow"]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [feed, setFeed] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepInfo[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  // Guards async responses against project switches mid-flight (review finding #2).
+  const selectedIdRef = useRef<string | null>(null);
+
+  function loadProjects() {
+    setLoadState("loading");
+    fetch(`${API}/projects`)
+      .then((r) => r.json())
+      .then((list) => {
+        setProjects(list);
+        setLoadState("ready");
+      })
+      .catch(() => setLoadState("error"));
+  }
 
   useEffect(() => {
-    fetch(`${API}/projects`).then((r) => r.json()).then(setProjects).catch(() => setProjects([]));
+    loadProjects();
     return () => esRef.current?.close();
   }, []);
 
+  function selectProject(p: Project) {
+    esRef.current?.close(); // never let another project's stream write here (finding #1)
+    esRef.current = null;
+    setSelected(p);
+    selectedIdRef.current = p.id;
+    setPlanId(null);
+    setPlanName(null);
+    setFootfallId(null);
+    setFootfallName(null);
+    setUploadErrors([]);
+    setFeed([]);
+    setSteps([]);
+    setStatus(null);
+  }
+
   async function createProject(e: React.FormEvent) {
     e.preventDefault();
-    const r = await fetch(`${API}/projects`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, client_name: client || null, space_type: spaceType }),
-    });
-    if (r.ok) {
+    setCreateError(null);
+    try {
+      const r = await fetch(`${API}/projects`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, client_name: client || null, space_type: spaceType }),
+      });
+      if (!r.ok) {
+        setCreateError(detailToMessages((await r.json()).detail).join(" "));
+        return;
+      }
       const p = await r.json();
       setProjects([p, ...projects]);
-      setSelected(p);
+      selectProject(p);
       setName("");
       setClient("");
+    } catch {
+      setCreateError("Couldn't reach the server — is the API running?");
     }
   }
 
   async function upload(kind: "floorplan" | "footfall", file: File) {
     if (!selected) return;
+    const pid = selected.id;
     setUploadErrors([]);
     const form = new FormData();
     form.append("file", file);
-    const r = await fetch(`${API}/projects/${selected.id}/uploads?kind=${kind}`, {
-      method: "POST",
-      body: form,
-    });
-    const body = await r.json();
-    if (!r.ok) {
-      const detail = body.detail;
-      setUploadErrors(Array.isArray(detail?.errors) ? detail.errors : [String(detail)]);
+    let r: Response;
+    let body: { id?: string; detail?: unknown };
+    try {
+      r = await fetch(`${API}/projects/${pid}/uploads?kind=${kind}`, { method: "POST", body: form });
+      body = await r.json();
+    } catch {
+      if (selectedIdRef.current === pid) setUploadErrors(["Upload failed — couldn't reach the server."]);
       return;
     }
-    if (kind === "floorplan") setPlanId(body.id);
-    else setFootfallId(body.id);
+    if (selectedIdRef.current !== pid) return; // user switched projects mid-upload
+    if (!r.ok) {
+      setUploadErrors(detailToMessages(body.detail));
+      return;
+    }
+    if (kind === "floorplan") {
+      setPlanId(body.id ?? null);
+      setPlanName(file.name);
+    } else {
+      setFootfallId(body.id ?? null);
+      setFootfallName(file.name);
+    }
   }
 
   async function startAnalysis() {
     if (!selected || !planId) return;
+    const pid = selected.id;
+    esRef.current?.close(); // one live stream at a time (finding #4)
+    setUploadErrors([]);
     setFeed([]);
     setSteps([]);
     setStatus("queued");
-    const r = await fetch(`${API}/projects/${selected.id}/analyses`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        floorplan_upload_id: planId,
-        footfall_upload_id: footfallId,
-        objectives,
-      }),
-    });
+    let r: Response;
+    try {
+      r = await fetch(`${API}/projects/${pid}/analyses`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          floorplan_upload_id: planId,
+          footfall_upload_id: footfallId,
+          objectives,
+        }),
+      });
+    } catch {
+      if (selectedIdRef.current === pid) {
+        setStatus(null);
+        setUploadErrors(["Couldn't reach the server — the analysis was not started."]);
+      }
+      return;
+    }
+    if (selectedIdRef.current !== pid) return;
     if (!r.ok) {
       setStatus(null);
-      setUploadErrors([String((await r.json()).detail)]);
+      setUploadErrors(detailToMessages((await r.json()).detail));
       return;
     }
     const { id } = await r.json();
     setStatus("running");
+
+    const syncFromServer = async () => {
+      try {
+        const detail = await fetch(`${API}/analyses/${id}`).then((res) => res.json());
+        if (selectedIdRef.current !== pid) return;
+        setStatus(detail.status);
+        setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
+      } catch {
+        /* transient — the stream or a retry will resync */
+      }
+    };
+
     const es = new EventSource(`${API}/analyses/${id}/events`);
     esRef.current = es;
-    es.onmessage = async (ev) => {
+    es.onmessage = (ev) => {
       const data = JSON.parse(ev.data) as { kind: string; message: string };
+      if (selectedIdRef.current !== pid) return;
       setFeed((f) => [...f, data.message]);
       if (data.kind === "end") {
         es.close();
-        setStatus(data.message);
-        const detail = await fetch(`${API}/analyses/${id}`).then((r) => r.json());
-        setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
+        void syncFromServer();
       }
     };
     es.onerror = () => {
-      es.close();
-      setStatus("failed");
+      // EventSource auto-reconnects on transient errors; only when it has given up
+      // do we resync the truth from the server — never guess "failed" (finding #3).
+      if (es.readyState === EventSource.CLOSED) void syncFromServer();
     };
   }
 
+  const busy = status === "queued" || status === "running";
   const inputCls =
     "w-full rounded-sheet border border-hairline bg-surface px-3 py-2 text-[15px] outline-none focus:border-viridian";
 
   return (
     <main className="mx-auto w-full max-w-[1120px] px-6 py-10">
       <header className="mb-10 flex items-baseline justify-between">
-        <a href="/" className="font-serif text-2xl tracking-tight">
+        <Link href="/" className="font-serif text-[28px] tracking-tight">
           Méyraki <span className="ms-2 font-mono text-xs uppercase tracking-[0.18em] text-graphite">Insight</span>
-        </a>
+        </Link>
         <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Projects</span>
       </header>
 
       <div className="grid gap-10 md:grid-cols-[320px_1fr]">
         {/* left: project list + create */}
         <section>
-          <DimLine label="Projects" right={String(projects.length)} />
-          <ul className="mt-4 space-y-1">
-            {projects.map((p) => (
-              <li key={p.id}>
-                <button
-                  onClick={() => {
-                    setSelected(p);
-                    setPlanId(null);
-                    setFootfallId(null);
-                    setFeed([]);
-                    setSteps([]);
-                    setStatus(null);
-                  }}
-                  className={`w-full rounded-sheet border px-3 py-2 text-left text-[15px] transition-colors ${
-                    selected?.id === p.id
-                      ? "border-viridian bg-viridian-tint"
-                      : "border-hairline bg-surface hover:border-graphite"
-                  }`}
-                >
-                  <span className="font-medium">{p.name}</span>
-                  <span className="ms-2 font-mono text-xs uppercase text-graphite">{p.space_type}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <DimLine label="Projects" right={loadState === "ready" ? String(projects.length) : "…"} />
+          {loadState === "error" ? (
+            <div className="mt-4 rounded-sheet border border-hairline bg-surface p-3 text-sm">
+              <p className="text-graphite">Couldn&apos;t reach the server — your projects are safe, but we can&apos;t load them right now.</p>
+              <button onClick={loadProjects} className="mt-2 rounded-sheet border border-hairline px-3 py-1.5 text-sm hover:border-graphite">
+                Try again
+              </button>
+            </div>
+          ) : loadState === "loading" ? (
+            <p className="mt-4 text-sm text-graphite">Loading projects…</p>
+          ) : (
+            <ul className="mt-4 space-y-1">
+              {projects.map((p) => (
+                <li key={p.id}>
+                  <button
+                    onClick={() => selectProject(p)}
+                    className={`w-full rounded-sheet border px-3 py-2 text-left text-[15px] transition-colors ${
+                      selected?.id === p.id
+                        ? "border-viridian bg-viridian-tint"
+                        : "border-hairline bg-surface hover:border-graphite"
+                    }`}
+                  >
+                    <span className="font-medium">{p.name}</span>
+                    <span className="ms-2 font-mono text-xs uppercase text-graphite">{p.space_type}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <form onSubmit={createProject} className="mt-8 space-y-3">
             <DimLine label="New project" />
-            <input className={inputCls} placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} required />
-            <input className={inputCls} placeholder="Client (optional)" value={client} onChange={(e) => setClient(e.target.value)} />
+            <input className={inputCls} placeholder="Project name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} required />
+            <input className={inputCls} placeholder="Client (optional)" value={client} maxLength={200} onChange={(e) => setClient(e.target.value)} />
             <select className={inputCls} value={spaceType} onChange={(e) => setSpaceType(e.target.value)}>
               {SPACE_TYPES.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-            <button className="rounded-sheet bg-ink px-4 py-2 text-[15px] font-medium text-paper hover:bg-black">
+            {createError ? <p className="text-sm text-thermal-text">{createError}</p> : null}
+            <button className="min-h-10 rounded-sheet bg-ink px-4 py-2 text-[15px] font-medium text-paper hover:bg-black">
               Create project
             </button>
           </form>
@@ -194,30 +289,38 @@ export default function ProjectsPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
                   <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
-                    Floorplan (PNG · JPG · PDF) {planId ? "· uploaded" : ""}
+                    Floorplan (PNG · JPG · PDF){planName ? ` · ${planName} ✓` : ""}
                   </span>
                   <input
                     type="file"
                     accept=".png,.jpg,.jpeg,.pdf"
                     className="mt-2 block w-full text-sm"
-                    onChange={(e) => e.target.files?.[0] && upload("floorplan", e.target.files[0])}
+                    onChange={(e) => {
+                      const f = e.currentTarget.files?.[0];
+                      e.currentTarget.value = ""; // same-file re-pick must re-fire (finding #7)
+                      if (f) void upload("floorplan", f);
+                    }}
                   />
                 </label>
                 <label className="block">
                   <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
-                    Footfall CSV (optional) {footfallId ? "· uploaded" : ""}
+                    Footfall CSV (optional){footfallName ? ` · ${footfallName} ✓` : ""}
                   </span>
                   <input
                     type="file"
                     accept=".csv"
                     className="mt-2 block w-full text-sm"
-                    onChange={(e) => e.target.files?.[0] && upload("footfall", e.target.files[0])}
+                    onChange={(e) => {
+                      const f = e.currentTarget.files?.[0];
+                      e.currentTarget.value = "";
+                      if (f) void upload("footfall", f);
+                    }}
                   />
                 </label>
               </div>
 
               {uploadErrors.length > 0 && (
-                <ul className="rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal">
+                <ul className="rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal-text">
                   {uploadErrors.map((e, i) => (
                     <li key={i}>{e}</li>
                   ))}
@@ -236,7 +339,7 @@ export default function ProjectsPage() {
                         onClick={() =>
                           setObjectives(on ? objectives.filter((x) => x !== o.id) : [...objectives, o.id])
                         }
-                        className={`rounded-sheet border px-3 py-1.5 text-sm transition-colors ${
+                        className={`min-h-10 rounded-sheet border px-3 py-1.5 text-sm transition-colors ${
                           on ? "border-viridian bg-viridian-tint text-viridian" : "border-hairline bg-surface"
                         }`}
                       >
@@ -249,10 +352,10 @@ export default function ProjectsPage() {
 
               <button
                 onClick={startAnalysis}
-                disabled={!planId || objectives.length === 0 || status === "running"}
-                className="rounded-sheet bg-ink px-6 py-3 text-[15px] font-medium text-paper transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!planId || objectives.length === 0 || busy}
+                className="min-h-10 rounded-sheet bg-ink px-6 py-3 text-[15px] font-medium text-paper transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {status === "running" ? "Analyzing…" : "Generate insights"}
+                {busy ? "Analyzing…" : "Generate insights"}
               </button>
 
               {feed.length > 0 && (
@@ -276,7 +379,7 @@ export default function ProjectsPage() {
                       className={`rounded-sheet border px-2 py-1 font-mono text-xs uppercase ${
                         s.status === "done"
                           ? "border-viridian text-viridian"
-                          : "border-thermal text-thermal"
+                          : "border-thermal text-thermal-text"
                       }`}
                     >
                       {s.name} · {s.status}

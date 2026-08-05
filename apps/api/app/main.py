@@ -161,11 +161,15 @@ def start_analysis(
         raise HTTPException(404, "Project not found")
     plan = session.get(Upload, body.floorplan_upload_id)
     if plan is None or plan.project_id != project_id or plan.kind != "floorplan":
-        raise HTTPException(422, "floorplan_upload_id is not a floorplan of this project")
+        raise HTTPException(
+            422, "That floorplan doesn't belong to this project — upload it here first."
+        )
     if body.footfall_upload_id:
         ff = session.get(Upload, body.footfall_upload_id)
         if ff is None or ff.project_id != project_id or ff.kind != "footfall":
-            raise HTTPException(422, "footfall_upload_id is not footfall data of this project")
+            raise HTTPException(
+                422, "That footfall file doesn't belong to this project — upload it here first."
+            )
 
     analysis = Analysis(
         project_id=project_id,
