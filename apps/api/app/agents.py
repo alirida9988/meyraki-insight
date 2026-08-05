@@ -291,10 +291,31 @@ Produce 2-3 DISTINCT scenarios. Rules:
 - Scenario ids: short snake_case. confidence in [0,1] per scenario.
 - Scenarios should differ in strategy (e.g. circulation-first vs revenue-first), not
   be variations of one idea."""
-    wire: WireLayout = _parse(
-        LAYOUT_MODEL, 16000, [{"type": "text", "text": prompt}], WireLayout
+    def attempt(text: str) -> LayoutProposals | None:
+        wire: WireLayout = _parse(LAYOUT_MODEL, 16000, [{"type": "text", "text": text}], WireLayout)
+        try:
+            return repair_layout(wire, graph, objectives)
+        except RuntimeError:
+            return None  # zero valid scenarios — caller decides whether to retry
+
+    first = attempt(prompt)
+    if first is not None and len(first.scenarios) >= 2:
+        return first
+
+    # One bounded retry with explicit feedback — the product promises 2-3 scenarios.
+    survived = len(first.scenarios) if first else 0
+    retry_prompt = (
+        prompt
+        + f"\n\nIMPORTANT: your previous answer yielded only {survived} valid scenario(s) "
+        "after validation. Moves whose zone_ids are not EXACTLY the ids listed above are "
+        "discarded. Produce 2-3 distinct scenarios, every move using exact zone ids."
     )
-    return repair_layout(wire, graph, objectives)
+    second = attempt(retry_prompt)
+    best = max((p for p in (first, second) if p is not None),
+               key=lambda p: len(p.scenarios), default=None)
+    if best is None:
+        raise RuntimeError("Layout Optimizer produced no scenario with valid zone references")
+    return best
 
 
 def repair_layout(
@@ -398,3 +419,68 @@ Rules:
         lighting_concept=wire.lighting_concept.strip() or None,
         image_keys=[],  # image generation lands with the Gemini key (docs/04 §2)
     )
+
+
+# ---------------------------------------------------------------- Report Writer
+
+REPORT_MODEL = "claude-sonnet-5"
+
+
+class WireReport(BaseModel):
+    executive_summary: str = Field(description="3-5 sentences, client-facing, leads with the outcome")
+    zone_findings: str = Field(description="what the space consists of and what stands out, 2-4 sentences")
+    flow_findings: str = Field(description="where guests concentrate, bottlenecks, dead zones, 2-4 sentences")
+    layout_recommendation: str = Field(
+        description="which scenario to start with and why, referencing the data, 3-5 sentences"
+    )
+    design_direction: str = Field(description="the moodboard direction in client language, 2-3 sentences")
+    next_steps: list[str] = Field(description="3-5 concrete actions, ordered")
+
+
+def run_report(
+    project_name: str,
+    client_name: str | None,
+    space_type: str,
+    intake: dict,
+    graph: ZoneGraph,
+    flow: FlowReport,
+    layout: LayoutProposals,
+    moodboard: Moodboard,
+    business: dict,
+) -> WireReport:
+    from .geometry import polygon_area
+
+    intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
+    zone_lines = "\n".join(
+        f"- {z.label} ({z.category.value}): {round(polygon_area(z.polygon) * 100, 1)}% of plan, "
+        f"intensity {intensity.get(z.id, 0.0)}"
+        for z in graph.zones
+    )
+    scenario_lines = "\n".join(
+        f"- {s.name} (confidence {s.confidence}): " + "; ".join(m.description for m in s.moves)
+        for s in layout.scenarios
+    )
+    prompt = f"""You are the Report Writer of a spatial-intelligence pipeline. Write the
+client-facing narrative for a branded insight report. Voice: measured, confident,
+specific — a senior consultant, never salesy. British or international English.
+
+Project: {project_name} — a {space_type}{f" for {client_name}" if client_name else ""}
+Intake notes: {intake.get("warnings", [])}
+Flow track: {"measured footfall data" if flow.track.value == "data_driven" else "simulated flow (no footfall data provided)"}
+Flow Efficiency Score: {business.get("flow_efficiency_score")}
+
+Zones:
+{zone_lines}
+
+Bottlenecks: {flow.bottlenecks} | Dead zones: {flow.dead_zones}
+
+Proposed scenarios:
+{scenario_lines}
+
+Design direction: {moodboard.style_name}; materials {", ".join(moodboard.materials)}
+
+Rules:
+- Ground every claim in the data above; no invented numbers.
+- Where flow is simulated, say so plainly once.
+- next_steps must be actions the client can schedule, ordered by leverage."""
+    return _parse(REPORT_MODEL, 4096, [{"type": "text", "text": prompt}], WireReport)

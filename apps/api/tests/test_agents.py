@@ -160,3 +160,45 @@ def test_palette_deduped_normalized_and_validated():
     ]
     with _pytest.raises(RuntimeError):
         clean_palette(["#AAAAAA", "#AAAAAA", "nope"])
+
+
+# M4 review of layout robustness: fewer than 2 surviving scenarios triggers one retry
+
+def test_run_layout_retries_once_then_takes_best(monkeypatch):
+    from app import agents
+    from app.flow import simulated
+    from meyraki_contracts import Objective
+
+    graph = _graph_two_zones()
+    flow = simulated(graph)
+    calls = []
+
+    def fake_parse(model, max_tokens, content, output_format):
+        calls.append(content[0]["text"])
+        if len(calls) == 1:
+            return WireLayout(scenarios=[_ws("only_one", ["lobby"])])
+        return WireLayout(scenarios=[_ws("a", ["lobby"]), _ws("b", ["cafe"])])
+
+    monkeypatch.setattr(agents, "_parse", fake_parse)
+    result = agents.run_layout(graph, flow, [Objective.GUEST_FLOW], "hotel", None)
+    assert len(calls) == 2
+    assert "yielded only 1 valid scenario" in calls[1]
+    assert len(result.scenarios) == 2
+
+
+def test_run_layout_keeps_first_when_retry_is_worse(monkeypatch):
+    from app import agents
+    from app.flow import simulated
+    from meyraki_contracts import Objective
+
+    graph = _graph_two_zones()
+    flow = simulated(graph)
+    outputs = [WireLayout(scenarios=[_ws("only_one", ["lobby"])]),
+               WireLayout(scenarios=[_ws("ghost_only", ["ghost"])])]
+
+    def fake_parse(model, max_tokens, content, output_format):
+        return outputs.pop(0)
+
+    monkeypatch.setattr(agents, "_parse", fake_parse)
+    result = agents.run_layout(graph, flow, [Objective.GUEST_FLOW], "hotel", None)
+    assert [s.id for s in result.scenarios] == ["only_one"]

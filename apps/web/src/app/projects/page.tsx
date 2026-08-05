@@ -33,6 +33,8 @@ type Results = {
   scenarios: ScenarioOut[];
   moodboard: MoodboardOut | null;
   flowScore: number | null;
+  reportReady: boolean;
+  analysisId: string;
 };
 
 const SPACE_TYPES = ["hotel", "cafe", "restaurant", "coworking", "office", "clinic", "gallery", "other"];
@@ -244,6 +246,8 @@ export default function ProjectsPage() {
           scenarios: output("layout")?.scenarios ?? [],
           moodboard: output("moodboard") ?? null,
           flowScore: output("business")?.flow_efficiency_score ?? null,
+          reportReady: Boolean(output("report")?.report_key),
+          analysisId: id,
         });
         if (["done", "failed", "rejected"].includes(detail.status)) {
           stopPolling();
@@ -519,6 +523,18 @@ export default function ProjectsPage() {
                     ))}
                   </div>
                 </div>
+              )}
+
+              {results?.reportReady && (
+                <a
+                  data-testid="report-download"
+                  href={`${API}/analyses/${results.analysisId}/report.pdf`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block min-h-10 rounded-sheet bg-viridian px-6 py-3 text-[15px] font-medium text-paper transition-opacity hover:opacity-90"
+                >
+                  Download insight report (PDF)
+                </a>
               )}
 
               {results?.moodboard && (

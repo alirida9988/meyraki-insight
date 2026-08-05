@@ -241,6 +241,22 @@ def resume_analysis(
     return {"id": analysis.id, "status": "queued"}
 
 
+@app.get("/analyses/{analysis_id}/report.pdf")
+def download_report(analysis_id: str, session: Session = Depends(get_session)) -> Response:
+    analysis = session.get(Analysis, analysis_id)
+    if analysis is None:
+        raise HTTPException(404, "Analysis not found")
+    report_step = next((s for s in analysis.steps if s.name == "report"), None)
+    key = (report_step.output or {}).get("report_key") if report_step else None
+    if not key:
+        raise HTTPException(404, "Report not ready for this analysis")
+    return Response(
+        content=storage.load(key),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="meyraki-insight-{analysis_id[:8]}.pdf"'},
+    )
+
+
 @app.get("/files/{key}")
 def get_file(key: str) -> Response:
     """Serve stored artifacts (heatmaps, moodboards, reports) by storage key."""

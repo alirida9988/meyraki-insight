@@ -262,8 +262,54 @@ def step_business(ctx: Ctx) -> BusinessCase:
 
 
 def step_report(ctx: Ctx) -> ReportArtifact:
-    # M4: real step renders the branded PDF and stores its key.
-    return ReportArtifact(language="en", sections=["zones", "flow", "layout", "moodboard", "business"])
+    graph = ZoneGraph.model_validate(ctx.outputs["zones"])
+    flow = FlowReport.model_validate(ctx.outputs["flow"])
+    layout = LayoutProposals.model_validate(ctx.outputs["layout"])
+    moodboard = Moodboard.model_validate(ctx.outputs["moodboard"])
+    business = ctx.outputs["business"]
+    project = ctx.analysis.project
+
+    if settings.agents_enabled():
+        from . import agents
+
+        wire = agents.run_report(
+            project.name,
+            project.client_name,
+            project.space_type,
+            ctx.outputs["intake"],
+            graph,
+            flow,
+            layout,
+            moodboard,
+            business,
+        )
+        narrative = wire.model_dump()
+    else:
+        # Stub path (tests/no key): no narrative, no PDF — report_key stays None.
+        return ReportArtifact(language="en", sections=["summary", "zones", "flow", "layout", "design"])
+
+    from . import pdf as pdf_mod
+    from . import report_html
+
+    heatmap_png = storage.load(flow.heatmap_key) if flow.heatmap_key else None
+    html = report_html.build_html(
+        project_name=project.name,
+        client_name=project.client_name,
+        space_type=project.space_type,
+        narrative=narrative,
+        graph=graph,
+        flow=flow,
+        layout=layout,
+        moodboard=moodboard,
+        business=business,
+        heatmap_png=heatmap_png,
+    )
+    key = storage.save(pdf_mod.html_to_pdf(html), ".pdf")
+    return ReportArtifact(
+        report_key=key,
+        language="en",
+        sections=["summary", "zones", "flow", "layout", "design", "next_steps", "assumptions"],
+    )
 
 
 def step_qa(ctx: Ctx) -> QAVerdict:

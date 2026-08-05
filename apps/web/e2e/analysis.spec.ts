@@ -98,5 +98,17 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
 
   // All 9 steps done
   await expect(page.getByText("qa · done")).toBeVisible();
+
+  // Branded PDF report is downloadable and a real PDF
+  const download = page.getByTestId("report-download");
+  await expect(download).toBeVisible();
+  const pdfUrl = await download.getAttribute("href");
+  const pdf = await page.request.get(pdfUrl!);
+  expect(pdf.status()).toBe(200);
+  expect(pdf.headers()["content-type"]).toContain("application/pdf");
+  const body = await pdf.body();
+  expect(body.subarray(0, 5).toString()).toBe("%PDF-");
+  expect(body.length).toBeGreaterThan(50_000); // embedded heatmap => substantial file
+
   await page.screenshot({ path: "e2e/results-full-analysis.png", fullPage: true });
 });
