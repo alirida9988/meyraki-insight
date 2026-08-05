@@ -1,0 +1,91 @@
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .db import Base
+
+
+def _id() -> str:
+    return uuid.uuid4().hex
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    name: Mapped[str] = mapped_column(String(200))
+    client_name: Mapped[str | None] = mapped_column(String(200), default=None)
+    space_type: Mapped[str] = mapped_column(String(32), default="other")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    uploads: Mapped[list["Upload"]] = relationship(back_populates="project")
+    analyses: Mapped[list["Analysis"]] = relationship(back_populates="project")
+
+
+class Upload(Base):
+    __tablename__ = "uploads"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    kind: Mapped[str] = mapped_column(String(16))  # "floorplan" | "footfall"
+    filename: Mapped[str] = mapped_column(String(300))
+    content_type: Mapped[str] = mapped_column(String(100))
+    storage_key: Mapped[str] = mapped_column(String(300))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    project: Mapped[Project] = relationship(back_populates="uploads")
+
+
+class Analysis(Base):
+    __tablename__ = "analyses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    # queued | running | done | failed | rejected
+    objectives: Mapped[list] = mapped_column(JSON, default=list)
+    brief: Mapped[str | None] = mapped_column(Text, default=None)
+    floorplan_upload_id: Mapped[str] = mapped_column(String(32))
+    footfall_upload_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    project: Mapped[Project] = relationship(back_populates="analyses")
+    steps: Mapped[list["StepRun"]] = relationship(
+        back_populates="analysis", order_by="StepRun.position"
+    )
+
+
+class StepRun(Base):
+    __tablename__ = "step_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id"))
+    position: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    # pending | running | done | failed | skipped
+    output: Mapped[dict | None] = mapped_column(JSON, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    analysis: Mapped[Analysis] = relationship(back_populates="steps")
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
