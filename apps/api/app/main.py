@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -239,6 +239,22 @@ def resume_analysis(
     session.commit()
     tasks.add_task(_run_in_background, analysis.id)
     return {"id": analysis.id, "status": "queued"}
+
+
+@app.get("/files/{key}")
+def get_file(key: str) -> Response:
+    """Serve stored artifacts (heatmaps, moodboards, reports) by storage key."""
+    try:
+        data = storage.load(key)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "File not found")
+    media = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".pdf": "application/pdf",
+    }.get(Path(key).suffix.lower(), "application/octet-stream")
+    return Response(content=data, media_type=media)
 
 
 @app.get("/analyses/{analysis_id}/events")

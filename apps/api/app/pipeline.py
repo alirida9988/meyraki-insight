@@ -34,11 +34,12 @@ from meyraki_contracts import (
     Track,
     Zone,
     ZoneCategory,
-    ZoneFlow,
     ZoneGraph,
 )
 
-from .models import Analysis, Event, StepRun
+from . import flow as flow_mod
+from . import heatmap, storage
+from .models import Analysis, Event, StepRun, Upload
 
 STEP_NAMES = [
     "intake",
@@ -65,9 +66,16 @@ def _emit(session: Session, analysis_id: str, kind: str, message: str) -> None:
 class Ctx:
     """Accumulated step outputs, keyed by step name."""
 
-    def __init__(self, analysis: Analysis):
+    def __init__(self, analysis: Analysis, session: Session):
         self.analysis = analysis
+        self.session = session
         self.outputs: dict[str, dict] = {}
+
+    def upload_bytes(self, upload_id: str | None) -> bytes | None:
+        if upload_id is None:
+            return None
+        upload = self.session.get(Upload, upload_id)
+        return storage.load(upload.storage_key) if upload else None
 
 
 # ---------------------------------------------------------------- stub steps (M2 replaces bodies)
@@ -110,17 +118,28 @@ def step_zones(ctx: Ctx) -> ZoneGraph:
 
 
 def step_flow(ctx: Ctx) -> FlowReport:
+    """Real implementation: measured footfall join, or simulated distance decay."""
     plan = ExecutionPlan.model_validate(ctx.outputs["routing"])
-    return FlowReport(
-        track=plan.track,
-        zone_flows=[
-            ZoneFlow(zone_id="entrance", intensity=0.6),
-            ZoneFlow(zone_id="lobby", intensity=0.9, is_bottleneck=True),
-            ZoneFlow(zone_id="cafe", intensity=0.3, is_dead_zone=True),
-        ],
-        bottlenecks=["lobby"],
-        dead_zones=["cafe"],
-    )
+    graph = ZoneGraph.model_validate(ctx.outputs["zones"])
+
+    if plan.track == Track.DATA_DRIVEN:
+        footfall_bytes = ctx.upload_bytes(ctx.analysis.footfall_upload_id)
+        report = (
+            flow_mod.data_driven(graph, footfall_bytes)
+            if footfall_bytes is not None
+            else flow_mod.simulated(graph)
+        )
+    else:
+        report = flow_mod.simulated(graph)
+
+    plan_bytes = ctx.upload_bytes(ctx.analysis.floorplan_upload_id)
+    if plan_bytes is not None:
+        png = heatmap.render(plan_bytes, graph, report)
+        if png is not None:
+            report.heatmap_key = storage.save(png, ".png")
+        else:
+            report.notes.append("Heatmap preview unavailable for PDF plans yet — arriving with rasterization (M3).")
+    return report
 
 
 def step_layout(ctx: Ctx) -> LayoutProposals:
@@ -245,7 +264,7 @@ def run_analysis(session: Session, analysis_id: str) -> None:
         return
     _emit(session, analysis.id, "pipeline", "Analysis started")
 
-    ctx = Ctx(analysis)
+    ctx = Ctx(analysis, session)
     try:
         for step in analysis.steps:
             if step.status == "done" and step.output is not None:

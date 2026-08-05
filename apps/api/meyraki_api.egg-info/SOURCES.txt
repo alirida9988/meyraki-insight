@@ -1,7 +1,10 @@
 pyproject.toml
 app/__init__.py
 app/db.py
+app/flow.py
 app/footfall.py
+app/geometry.py
+app/heatmap.py
 app/main.py
 app/models.py
 app/pipeline.py
@@ -13,3 +16,4 @@ meyraki_api.egg-info/dependency_links.txt
 meyraki_api.egg-info/requires.txt
 meyraki_api.egg-info/top_level.txt
 tests/test_api.py
+tests/test_hardening.py

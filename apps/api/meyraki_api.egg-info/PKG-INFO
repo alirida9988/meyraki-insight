@@ -9,6 +9,7 @@ Requires-Dist: meyraki-contracts
 Requires-Dist: sqlalchemy>=2.0
 Requires-Dist: psycopg[binary]>=3.2
 Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: pillow>=10
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: httpx>=0.27; extra == "dev"

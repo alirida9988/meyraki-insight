@@ -4,6 +4,7 @@ meyraki-contracts
 sqlalchemy>=2.0
 psycopg[binary]>=3.2
 python-multipart>=0.0.9
+pillow>=10
 
 [dev]
 pytest>=8
