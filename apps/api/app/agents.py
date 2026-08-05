@@ -71,6 +71,8 @@ def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseM
     )
     if response.stop_reason == "refusal":
         raise AgentRefusal(f"{model} declined the request")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(f"{model} output truncated at max_tokens — raise the step's budget")
     if response.parsed_output is None:
         raise RuntimeError(f"{model} returned no parseable output")
     return response.parsed_output
@@ -216,6 +218,10 @@ def repair_zone_graph(wire: WireZoneGraph) -> ZoneGraph:
     entrances = [e.strip().lower().replace(" ", "_") for e in wire.entrances]
     entrances = [e for e in dict.fromkeys(entrances) if e in seen]
 
+    if not zones:
+        raise RuntimeError(
+            "Zone Analyst found no usable zones — the plan may be unreadable or too abstract"
+        )
     return ZoneGraph(zones=zones, adjacency=adjacency, entrances=entrances)
 
 
@@ -348,6 +354,21 @@ class WireMoodboard(BaseModel):
 _HEX = __import__("re").compile(r"^#?[0-9a-fA-F]{6}$")
 
 
+def clean_palette(raw: list[str]) -> list[str]:
+    """Validated, normalized, deduped hex palette; fails loudly below 3 colors."""
+    palette: list[str] = []
+    for c in raw:
+        c = c.strip()
+        if _HEX.match(c):
+            c = c.upper() if c.startswith("#") else f"#{c.upper()}"
+            c = "#" + c.lstrip("#")
+            if c not in palette:
+                palette.append(c)
+    if len(palette) < 3:
+        raise RuntimeError(f"Moodboard Designer returned an unusable palette: {raw}")
+    return palette
+
+
 def run_moodboard(
     space_type: str, objectives: list[Objective], brief: str | None, graph: ZoneGraph
 ) -> Moodboard:
@@ -368,13 +389,7 @@ Rules:
     wire: WireMoodboard = _parse(
         MOODBOARD_MODEL, 4096, [{"type": "text", "text": prompt}], WireMoodboard
     )
-    palette = []
-    for c in wire.palette:
-        c = c.strip()
-        if _HEX.match(c):
-            palette.append(c if c.startswith("#") else f"#{c}")
-    if len(palette) < 3:
-        raise RuntimeError(f"Moodboard Designer returned an unusable palette: {wire.palette}")
+    palette = clean_palette(wire.palette)
     return Moodboard(
         style_name=wire.style_name.strip(),
         palette=palette[:6],

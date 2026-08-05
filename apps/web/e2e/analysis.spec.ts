@@ -21,6 +21,31 @@ test("invalid floorplan is rejected with a human message", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Generate insights" })).toBeDisabled();
 });
 
+test("valid image that is not a floorplan: Intake Agent rejects with its reason", async ({ page }) => {
+  await page.goto("/projects");
+  await page.getByPlaceholder("Project name").fill(`${unique} intake-reject`);
+  await page.getByRole("button", { name: "Create project" }).click();
+  await expect(page.getByText(`Analysis · ${unique} intake-reject`)).toBeVisible();
+
+  // A structurally valid PNG (passes magic-byte check) that is a bar chart
+  await page
+    .locator('input[type="file"][accept=".png,.jpg,.jpeg,.pdf"]')
+    .setInputFiles(fixture("not_a_floorplan.png"));
+  await expect(page.getByText(/NOT_A_FLOORPLAN\.PNG ✓/i)).toBeVisible();
+
+  await page.getByRole("button", { name: "Generate insights" }).click();
+
+  // The real Intake Agent (Haiku vision) must reject it with a human sentence
+  await expect(page.locator("span.dim-label", { hasText: "rejected" }).first()).toBeVisible({
+    timeout: 120_000,
+  });
+  const reason = page.getByTestId("analysis-error");
+  await expect(reason).toBeVisible();
+  expect(((await reason.textContent()) ?? "").length).toBeGreaterThan(10);
+  // Nothing past intake ran — no paid zones/layout calls
+  await expect(page.getByText("zones: started")).toHaveCount(0);
+});
+
 test("full analysis: upload → agents → heatmap, scenarios, moodboard, score", async ({ page }) => {
   await page.goto("/projects");
   await page.getByPlaceholder("Project name").fill(unique);

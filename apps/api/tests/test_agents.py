@@ -136,3 +136,27 @@ def test_flow_efficiency_score_excludes_back_of_house():
     flow = simulated(graph)  # lobby=1.0, kitchen=0.75
     # kitchen is back-of-house -> score reflects lobby only
     assert flow_efficiency_score(graph, flow) == 100.0
+
+
+# Review findings #2 and #3 (2026-08-06)
+
+def test_empty_zone_graph_fails_at_the_source():
+    from app.agents import WireZoneGraph
+    import pytest as _pytest
+
+    line_only = WireZoneGraph(
+        zones=[_wz("line", points=[(0, 0), (1, 1)])], adjacency=[], entrances=[]
+    )
+    with _pytest.raises(RuntimeError, match="no usable zones"):
+        repair_zone_graph(line_only)
+
+
+def test_palette_deduped_normalized_and_validated():
+    from app.agents import clean_palette
+    import pytest as _pytest
+
+    assert clean_palette(["#aaaaaa", "AAAAAA", "#BBBBBB", "#cccccc", "junk", "#FFF"]) == [
+        "#AAAAAA", "#BBBBBB", "#CCCCCC",
+    ]
+    with _pytest.raises(RuntimeError):
+        clean_palette(["#AAAAAA", "#AAAAAA", "nope"])

@@ -86,6 +86,7 @@ export default function ProjectsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [heatmapKey, setHeatmapKey] = useState<string | null>(null);
   const [results, setResults] = useState<Results | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   // Guards async responses against project switches mid-flight (review finding #2).
   const selectedIdRef = useRef<string | null>(null);
@@ -136,6 +137,7 @@ export default function ProjectsPage() {
     setStatus(null);
     setHeatmapKey(null);
     setResults(null);
+    setAnalysisError(null);
   }
 
   async function createProject(e: React.FormEvent) {
@@ -199,6 +201,7 @@ export default function ProjectsPage() {
     setSteps([]);
     setHeatmapKey(null);
     setResults(null);
+    setAnalysisError(null);
     setStatus("queued");
     let r: Response;
     try {
@@ -235,6 +238,7 @@ export default function ProjectsPage() {
         setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
         const output = (name: string) =>
           detail.steps.find((s: { name: string }) => s.name === name)?.output;
+        setAnalysisError(detail.error ?? null);
         setHeatmapKey(output("flow")?.heatmap_key ?? null);
         setResults({
           scenarios: output("layout")?.scenarios ?? [],
@@ -416,6 +420,15 @@ export default function ProjectsPage() {
               >
                 {busy ? "Analyzing…" : "Generate insights"}
               </button>
+
+              {(status === "rejected" || status === "failed") && analysisError && (
+                <p
+                  data-testid="analysis-error"
+                  className="rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal-text"
+                >
+                  {analysisError}
+                </p>
+              )}
 
               {feed.length > 0 && (
                 <div>

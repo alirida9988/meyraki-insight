@@ -350,24 +350,29 @@ def run_analysis(session: Session, analysis_id: str) -> None:
         for step in analysis.steps:
             if step.status == "done" and step.output is not None:
                 ctx.outputs[step.name] = step.output
-                continue
-            step.status = "running"
-            step.started_at = _now()
-            analysis.heartbeat_at = _now()
-            session.commit()
-            _emit(session, analysis.id, "step", f"{step.name}: started")
+            else:
+                step.status = "running"
+                step.started_at = _now()
+                analysis.heartbeat_at = _now()
+                session.commit()
+                _emit(session, analysis.id, "step", f"{step.name}: started")
 
-            output = STEPS[step.name](ctx)  # raises on contract violation
-            step.output = output.model_dump(mode="json")
-            step.status = "done"
-            step.finished_at = _now()
-            session.commit()
-            ctx.outputs[step.name] = step.output
-            _emit(session, analysis.id, "step", f"{step.name}: done")
+                output = STEPS[step.name](ctx)  # raises on contract violation
+                step.output = output.model_dump(mode="json")
+                step.status = "done"
+                step.finished_at = _now()
+                session.commit()
+                ctx.outputs[step.name] = step.output
+                _emit(session, analysis.id, "step", f"{step.name}: done")
 
-            if step.name == "intake" and output.plan_quality == PlanQuality.NOT_A_FLOORPLAN:  # type: ignore[union-attr]
+            # Path-independent: fires whether intake just ran or was loaded from a
+            # prior (possibly crashed) run — a non-floorplan must never continue.
+            if (
+                step.name == "intake"
+                and ctx.outputs["intake"].get("plan_quality") == PlanQuality.NOT_A_FLOORPLAN.value
+            ):
                 analysis.status = "rejected"
-                analysis.error = output.rejection_reason  # type: ignore[union-attr]
+                analysis.error = ctx.outputs["intake"].get("rejection_reason")
                 session.commit()
                 _emit(session, analysis.id, "pipeline", "Rejected at intake")
                 return

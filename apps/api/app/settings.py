@@ -1,14 +1,25 @@
 import os
 from pathlib import Path
 
-# Load apps/api/.env (KEY=VALUE lines) without adding a dependency; real env wins.
-_env_file = Path(__file__).resolve().parent.parent / ".env"
-if _env_file.exists():
-    for _line in _env_file.read_text().splitlines():
-        _line = _line.strip()
-        if _line and not _line.startswith("#") and "=" in _line:
-            _k, _, _v = _line.partition("=")
-            os.environ.setdefault(_k.strip(), _v.strip())
+def load_env_file(path: Path) -> None:
+    """Minimal dotenv: KEY=VALUE lines, `export ` prefix and single/double quotes
+    handled, comments skipped. Real environment always wins (setdefault)."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip().removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
+
+
+load_env_file(Path(__file__).resolve().parent.parent / ".env")
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",

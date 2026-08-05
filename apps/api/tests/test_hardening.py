@@ -150,3 +150,41 @@ def test_report_step_outputs_report_artifact(client, project_id):
     report = next(s for s in d["steps"] if s["name"] == "report")
     assert "report_key" in report["output"]
     assert "passed" not in report["output"]
+
+
+# Review finding #1 (2026-08-06): crash between "intake done" and the rejection
+# commit must still reject on resume — never run the paid pipeline on a non-floorplan.
+def test_resume_after_crash_still_rejects_non_floorplan(client, project_id):
+    aid = _analysis(client, project_id)
+    _wait_done(client, aid)
+
+    with SessionLocal() as s:
+        a = s.get(Analysis, aid)
+        a.status = "running"
+        a.heartbeat_at = datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
+        a.error = None
+        for step in a.steps:
+            if step.name == "intake":
+                step.status = "done"
+                step.output = {
+                    "plan_quality": "not_a_floorplan",
+                    "plan_kind": "raster",
+                    "has_scale_hint": False,
+                    "floors_detected": 1,
+                    "space_type_detected": "other",
+                    "footfall": "none",
+                    "footfall_errors": [],
+                    "warnings": [],
+                    "rejection_reason": "This looks like a photo, not a floorplan.",
+                }
+            else:
+                step.status = "pending"
+                step.output = None
+        s.commit()
+
+    assert client.post(f"/analyses/{aid}/resume").status_code == 200
+    d = _wait_done(client, aid)
+    assert d["status"] == "rejected"
+    assert d["error"] == "This looks like a photo, not a floorplan."
+    steps = {s["name"]: s["status"] for s in d["steps"]}
+    assert steps["zones"] == "pending"  # nothing past intake ever ran
