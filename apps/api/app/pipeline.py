@@ -38,7 +38,7 @@ from meyraki_contracts import (
 )
 
 from . import flow as flow_mod
-from . import heatmap, storage
+from . import heatmap, settings, storage
 from .models import Analysis, Event, StepRun, Upload
 
 STEP_NAMES = [
@@ -78,14 +78,22 @@ class Ctx:
         return storage.load(upload.storage_key) if upload else None
 
 
-# ---------------------------------------------------------------- stub steps (M2 replaces bodies)
+# ---------------------------------------------------------------- steps
 
 def step_intake(ctx: Ctx) -> IntakeManifest:
+    footfall = FootfallStatus.VALID if ctx.analysis.footfall_upload_id else FootfallStatus.NONE
+    if settings.agents_enabled():
+        from . import agents
+
+        plan_bytes = ctx.upload_bytes(ctx.analysis.floorplan_upload_id)
+        if plan_bytes is not None:
+            return agents.run_intake(plan_bytes, footfall)
+    # Stub fallback (no API key / MEYRAKI_USE_AGENTS=off): trusts the upload validation.
     return IntakeManifest(
         plan_quality=PlanQuality.OK,
         plan_kind=PlanKind.RASTER,
         space_type_detected=ctx.analysis.project.space_type,  # type: ignore[arg-type]
-        footfall=FootfallStatus.VALID if ctx.analysis.footfall_upload_id else FootfallStatus.NONE,
+        footfall=footfall,
     )
 
 
@@ -100,6 +108,13 @@ def step_routing(ctx: Ctx) -> ExecutionPlan:
 
 
 def step_zones(ctx: Ctx) -> ZoneGraph:
+    if settings.agents_enabled():
+        from . import agents
+
+        plan_bytes = ctx.upload_bytes(ctx.analysis.floorplan_upload_id)
+        if plan_bytes is not None:
+            return agents.run_zones(plan_bytes)
+    # Stub fallback: fixed demo zones.
     square = lambda x0, y0, x1, y1: [  # noqa: E731
         Point(x=x0, y=y0), Point(x=x1, y=y0), Point(x=x1, y=y1), Point(x=x0, y=y1)
     ]
