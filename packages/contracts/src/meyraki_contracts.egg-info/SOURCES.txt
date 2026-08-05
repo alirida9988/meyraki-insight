@@ -1,0 +1,8 @@
+pyproject.toml
+src/meyraki_contracts/__init__.py
+src/meyraki_contracts.egg-info/PKG-INFO
+src/meyraki_contracts.egg-info/SOURCES.txt
+src/meyraki_contracts.egg-info/dependency_links.txt
+src/meyraki_contracts.egg-info/requires.txt
+src/meyraki_contracts.egg-info/top_level.txt
+tests/test_contracts.py

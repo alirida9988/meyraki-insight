@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* Meyraki Insight design tokens — docs/02-DESIGN-SYSTEM.md is the source of truth */
+:root {
+  --paper: #fbfaf7;
+  --surface: #ffffff;
+  --ink: #16130e;
+  --graphite: #57534a;
+  --hairline: #e7e4dc;
+  --viridian: #1c4a3e;
+  --viridian-tint: #edf2ef;
+  --thermal: #da4b22;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-graphite: var(--graphite);
+  --color-hairline: var(--hairline);
+  --color-viridian: var(--viridian);
+  --color-viridian-tint: var(--viridian-tint);
+  --color-thermal: var(--thermal);
+  --font-sans: var(--font-instrument-sans);
+  --font-serif: var(--font-instrument-serif);
+  --font-mono: var(--font-plex-mono);
+  --radius-sheet: 2px;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-instrument-sans), system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+::selection {
+  background: var(--viridian);
+  color: var(--paper);
+}
+
+:focus-visible {
+  outline: 2px solid var(--viridian);
+  outline-offset: 2px;
+}
+
+/* Signature device: dimension-line annotation (see design system §4) */
+.dim-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dim-line .dim-label {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--graphite);
+  white-space: nowrap;
+}
+.dim-line .dim-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+  position: relative;
+}
+.dim-line .dim-rule::before,
+.dim-line .dim-rule::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  width: 1px;
+  height: 9px;
+  background: var(--graphite);
+}
+.dim-line .dim-rule::before { inset-inline-start: 0; }
+.dim-line .dim-rule::after { inset-inline-end: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
