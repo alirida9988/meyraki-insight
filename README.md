@@ -29,6 +29,21 @@ cd apps/api && python3 -m venv .venv && .venv/bin/pip install -e ../../packages/
 apps/api/.venv/bin/python -m pytest packages/contracts/tests
 ```
 
+## Branch flow
+
+`main` is always green and always deployable — CI (`.github/workflows/ci.yml`)
+runs the offline suite plus web lint and build on every push and pull request.
+
+```
+main                     always green, always deployable
+ └── feat/<name>         one feature or milestone per branch
+      → PR → CI green → merge (--no-ff) → main
+```
+
+Before merging anything: run the verification ritual (`/ship-check`, or
+`CLAUDE.md` § How we work). Layers 2–4 (live QA hunt, Playwright E2E,
+adversarial review) cost model credits and run locally, not in CI.
+
 ## Deployment requirements (security)
 
 These are enforced by configuration, not code defaults — set them in any
