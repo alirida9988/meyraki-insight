@@ -24,7 +24,11 @@ _GEMINI_URL = (
 )
 _FREE_URL = "https://image.pollinations.ai/prompt/"
 
-MIN_IMAGE_BYTES = 5_000  # below this it is an error page or a placeholder, not a render
+MIN_IMAGE_BYTES = 5_000       # below this it is an error page or a placeholder, not a render
+MAX_IMAGE_BYTES = 12_000_000  # above this the PDF data-URI bloat is a DoS (review M8)
+# Per-read timeout must be far below the total budget so a drip-feeding host
+# cannot hold a worker thread indefinitely (review M8).
+TIMEOUT = httpx.Timeout(120.0, read=20.0, connect=10.0)
 _MAGIC = ((b"\x89PNG\r\n\x1a\n", ".png", "image/png"), (b"\xff\xd8\xff", ".jpg", "image/jpeg"))
 
 
@@ -47,6 +51,8 @@ def _classify(data: bytes, provider: str) -> Render:
         if data.startswith(magic):
             if len(data) < MIN_IMAGE_BYTES:
                 raise RuntimeError(f"{provider} returned a {len(data)}-byte image (too small)")
+            if len(data) > MAX_IMAGE_BYTES:
+                raise RuntimeError(f"{provider} returned {len(data)} bytes (over the size cap)")
             return Render(data, suffix, provider)
     raise RuntimeError(f"{provider} returned a non-image payload")
 
@@ -80,18 +86,20 @@ def _gemini(prompt: str) -> Render:
         _GEMINI_URL,
         headers={"x-goog-api-key": settings.GEMINI_API_KEY, "content-type": "application/json"},
         json={"contents": [{"parts": [{"text": prompt}]}]},
-        timeout=120,
+        timeout=TIMEOUT,
     )
     response.raise_for_status()
     return _classify(extract_image(response.json()), "gemini")
 
 
 def _free(prompt: str) -> Render:
-    url = _FREE_URL + urllib.parse.quote(prompt[:900])
+    # safe="" — a model/user-influenced prompt must never inject path segments
+    # into the provider URL (review M7).
+    url = _FREE_URL + urllib.parse.quote(prompt[:900], safe="")
     response = httpx.get(
         url,
         params={"width": 1024, "height": 1024, "nologo": "true", "model": "flux"},
-        timeout=120,
+        timeout=TIMEOUT,
         follow_redirects=True,
     )
     response.raise_for_status()

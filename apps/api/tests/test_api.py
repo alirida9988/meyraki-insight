@@ -21,8 +21,6 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 
 @pytest.fixture(scope="module")
 def client():
-    if os.path.exists("test_meyraki.db"):
-        os.remove("test_meyraki.db")
     with TestClient(app) as c:
         c.post("/auth/register", json={
             "email": f"apiorg-{os.getpid()}@test.dev",

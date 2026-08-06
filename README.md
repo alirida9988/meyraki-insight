@@ -28,3 +28,19 @@ cd apps/api && python3 -m venv .venv && .venv/bin/pip install -e ../../packages/
 # tests
 apps/api/.venv/bin/python -m pytest packages/contracts/tests
 ```
+
+## Deployment requirements (security)
+
+These are enforced by configuration, not code defaults — set them in any
+non-local environment:
+
+| Variable | Value | Why |
+|---|---|---|
+| `MEYRAKI_HTTPS` | `1` | Adds `Secure` to the session cookie. A TLS-terminating proxy does **not** add it for you. |
+| `MEYRAKI_WEB_ORIGINS` | `https://app.example.com` | CORS allow-list **and** the server-side CSRF origin check (comma-separated). |
+| `MEYRAKI_TRUST_PROXY` | `1` | Only when a trusted proxy is the sole ingress. Rate limits then key on the last `X-Forwarded-For` hop instead of the proxy IP (otherwise every customer shares one bucket). |
+| uvicorn flags | `--proxy-headers --forwarded-allow-ips=<lb-cidr>` | Same reason, at the server level. |
+| `DATABASE_URL` | managed Postgres URL | Never fall back to the committed dev default. |
+
+Rate limits are per process and in memory (`app/ratelimit.py`); move them to
+Redis before running multiple workers behind a load balancer.

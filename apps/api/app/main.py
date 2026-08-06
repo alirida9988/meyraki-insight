@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schemas
@@ -29,24 +30,39 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Meyraki Insight API", version="0.1.0", lifespan=lifespan)
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def guard(request, call_next):
+    """Rate limiting + server-side CSRF origin check.
+
+    Registered BEFORE CORSMiddleware so CORS wraps it: every response this
+    returns (including 429) still carries CORS headers and is readable by the
+    browser (review M4).
+    """
+    from fastapi.responses import JSONResponse
+
+    # Multipart uploads are CORS-safelisted (no preflight), so SameSite is not
+    # the only thing standing between us and cross-site writes (review m11).
+    origin = request.headers.get("origin")
+    if request.method in UNSAFE_METHODS and origin and origin not in settings.WEB_ORIGINS:
+        return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+    try:
+        ratelimit.check(request)
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=429, headers=exc.headers)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.WEB_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def rate_limit(request, call_next):
-    try:
-        ratelimit.check(request)
-    except HTTPException as exc:
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse({"detail": exc.detail}, status_code=429, headers=exc.headers)
-    return await call_next(request)
 
 
 # ---------------------------------------------------------------- auth
@@ -58,8 +74,8 @@ class RegisterIn(BaseModel):
 
 
 class LoginIn(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=200)
 
 
 @app.post("/auth/register", status_code=201)
@@ -72,7 +88,11 @@ def register(body: RegisterIn, response: Response, session: Session = Depends(ge
     session.flush()
     user = User(org_id=org.id, email=email, password_hash=auth_mod.hash_password(body.password))
     session.add(user)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:  # concurrent register of the same email (review m14)
+        session.rollback()
+        raise HTTPException(409, "An account with this email already exists — sign in instead.")
     auth_mod.set_cookie(response, auth_mod.create_session(session, user))
     return {"email": user.email, "org": org.name}
 
@@ -80,7 +100,12 @@ def register(body: RegisterIn, response: Response, session: Session = Depends(ge
 @app.post("/auth/login")
 def login(body: LoginIn, response: Response, session: Session = Depends(get_session)) -> dict:
     user = session.scalar(select(User).where(User.email == body.email.strip().lower()))
-    if user is None or not auth_mod.verify_password(body.password, user.password_hash):
+    # Always pay the bcrypt cost so response time can't reveal whether the
+    # account exists (review M2).
+    ok = auth_mod.verify_password(
+        body.password, user.password_hash if user else auth_mod.DUMMY_HASH
+    )
+    if user is None or not ok:
         raise HTTPException(401, "Email or password is incorrect.")
     auth_mod.set_cookie(response, auth_mod.create_session(session, user))
     org = session.get(Org, user.org_id)
@@ -356,7 +381,7 @@ def download_report(
         raise HTTPException(404, "Report not ready for this analysis")
     try:
         content = storage.load(key)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, OSError):
         raise HTTPException(404, "Report file no longer available — re-run the analysis")
     return Response(
         content=content,
@@ -365,12 +390,41 @@ def download_report(
     )
 
 
-@app.get("/files/{key}")
-def get_file(key: str, user: User = Depends(auth_mod.current_user)) -> Response:
-    """Serve stored artifacts (heatmaps, moodboards, reports) by storage key."""
+def _artifact_keys(output: dict | None) -> set[str]:
+    """Storage keys an analysis legitimately exposes (heatmap, renders, report)."""
+    if not isinstance(output, dict):
+        return set()
+    keys = {
+        value
+        for field in ("heatmap_key", "report_key")
+        if isinstance(value := output.get(field), str) and value
+    }
+    keys |= {k for k in (output.get("image_keys") or []) if isinstance(k, str) and k}
+    return keys
+
+
+@app.get("/analyses/{analysis_id}/files/{key}")
+def get_file(
+    analysis_id: str,
+    key: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> Response:
+    """Serve stored artifacts, scoped to the analysis that owns them.
+
+    Artifact keys travel in API responses and <img> URLs, so authentication
+    alone is not a boundary — the key must belong to an analysis of the
+    caller's org (review B1).
+    """
+    analysis = _own_analysis(session, user, analysis_id)
+    allowed: set[str] = set()
+    for step in analysis.steps:
+        allowed |= _artifact_keys(step.output)
+    if key not in allowed:
+        raise HTTPException(404, "File not found")
     try:
         data = storage.load(key)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, OSError):  # OSError covers missing + IsADirectory (review m13)
         raise HTTPException(404, "File not found")
     media = {
         ".png": "image/png",

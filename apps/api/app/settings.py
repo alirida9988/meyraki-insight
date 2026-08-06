@@ -29,6 +29,12 @@ DATABASE_URL = os.environ.get(
 # Local disk in dev; swapped for S3-compatible storage before pilot.
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "var/uploads"))
 
+WEB_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("MEYRAKI_WEB_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 

@@ -5,8 +5,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const apiFetch = (path: string, init?: RequestInit) =>
-  fetch(`${API}${path}`, { credentials: "include", ...init });
+const apiFetch = async (path: string, init?: RequestInit) => {
+  const r = await fetch(`${API}${path}`, { credentials: "include", ...init });
+  if (r.status === 401) {
+    // A dead cookie must never leave the page silently spinning or polling
+    // forever against 401s (review m10).
+    window.location.href = "/login";
+    throw new Error("unauthenticated");
+  }
+  return r;
+};
 
 type Project = {
   id: string;
@@ -112,13 +120,7 @@ export default function ProjectsPage() {
   function loadProjects() {
     setLoadState("loading");
     apiFetch("/projects")
-      .then((r) => {
-        if (r.status === 401) {
-          router.push("/login");
-          throw new Error("unauthenticated");
-        }
-        return r.json();
-      })
+      .then((r) => r.json())
       .then((list) => {
         setProjects(list);
         setLoadState("ready");
@@ -310,6 +312,8 @@ export default function ProjectsPage() {
           <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Projects</span>
           <button
             onClick={async () => {
+              esRef.current?.close();
+              stopPolling();
               await apiFetch("/auth/logout", { method: "POST" });
               router.push("/login");
             }}
@@ -511,12 +515,12 @@ export default function ProjectsPage() {
                 </div>
               )}
 
-              {heatmapKey && (
+              {heatmapKey && results && (
                 <div>
                   <DimLine label="Flow heatmap" right="cool → hot" />
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`${API}/files/${heatmapKey}`}
+                    src={`${API}/analyses/${results.analysisId}/files/${heatmapKey}`}
                     alt="Guest-flow heatmap over the uploaded floorplan"
                     className="mt-3 w-full rounded-sheet border border-hairline"
                   />
@@ -594,7 +598,7 @@ export default function ProjectsPage() {
                         <img
                           key={key}
                           data-testid="moodboard-render"
-                          src={`${API}/files/${key}`}
+                          src={`${API}/analyses/${results.analysisId}/files/${key}`}
                           alt={`${results.moodboard!.style_name} interior render`}
                           className="aspect-square w-full rounded-sheet border border-hairline object-cover"
                         />
