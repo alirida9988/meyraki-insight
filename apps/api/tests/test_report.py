@@ -91,3 +91,22 @@ def test_report_html_arabic_direction_attribute():
     fx["project_name"] = "فندق كليو"
     html = build_html(**fx)
     assert '<h1 dir="auto">فندق كليو</h1>' in html
+
+
+# Arabic report support (2026-08-06)
+
+def test_report_html_arabic_rtl_full():
+    fx = _fixtures()
+    fx["language"] = "ar"
+    html = build_html(**fx)
+    assert 'lang="ar" dir="rtl"' in html
+    assert "الملخص التنفيذي" in html and "الخطوات التالية" in html
+    assert "IBM+Plex+Sans+Arabic" in html and "Amiri" in html
+    assert "المنطقة" in html  # table header localized
+
+
+def test_report_html_unknown_language_falls_back_to_english():
+    fx = _fixtures()
+    fx["language"] = "xx"
+    html = build_html(**fx)
+    assert "Executive summary" in html and 'dir="ltr"' in html

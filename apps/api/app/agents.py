@@ -493,6 +493,7 @@ def run_report(
     layout: LayoutProposals,
     moodboard: Moodboard,
     business: dict,
+    language: str = "en",
 ) -> WireReport:
     from .geometry import polygon_area
 
@@ -506,9 +507,16 @@ def run_report(
         f"- {s.name} (confidence {s.confidence}): " + "; ".join(m.description for m in s.moves)
         for s in layout.scenarios
     )
+    language_rule = (
+        "Write ALL fields in Modern Standard Arabic — formal business register, the "
+        "voice of a senior Gulf consultancy. Keep numerals as Latin digits (37.1, 18%). "
+        "Zone names may stay as written on the plan."
+        if language == "ar"
+        else "British or international English."
+    )
     prompt = f"""You are the Report Writer of a spatial-intelligence pipeline. Write the
 client-facing narrative for a branded insight report. Voice: measured, confident,
-specific — a senior consultant, never salesy. British or international English.
+specific — a senior consultant, never salesy. {language_rule}
 
 Project: {project_name} — a {space_type}{f" for {client_name}" if client_name else ""}
 Intake notes: {intake.get("warnings", [])}

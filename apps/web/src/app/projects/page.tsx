@@ -83,6 +83,7 @@ export default function ProjectsPage() {
   const [footfallId, setFootfallId] = useState<string | null>(null);
   const [footfallName, setFootfallName] = useState<string | null>(null);
   const [objectives, setObjectives] = useState<string[]>(["guest_flow"]);
+  const [reportLanguage, setReportLanguage] = useState<"en" | "ar">("en");
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [feed, setFeed] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepInfo[]>([]);
@@ -215,6 +216,7 @@ export default function ProjectsPage() {
           floorplan_upload_id: planId,
           footfall_upload_id: footfallId,
           objectives,
+          report_language: reportLanguage,
         }),
       });
     } catch {
@@ -415,6 +417,27 @@ export default function ProjectsPage() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              <div>
+                <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Report language</span>
+                <div className="mt-2 flex gap-2">
+                  {(["en", "ar"] as const).map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      data-testid={`report-lang-${lang}`}
+                      onClick={() => setReportLanguage(lang)}
+                      className={`min-h-10 rounded-sheet border px-3 py-1.5 text-sm transition-colors ${
+                        reportLanguage === lang
+                          ? "border-viridian bg-viridian-tint text-viridian"
+                          : "border-hairline bg-surface"
+                      }`}
+                    >
+                      {lang === "en" ? "English" : "العربية"}
+                    </button>
+                  ))}
                 </div>
               </div>
 

@@ -280,6 +280,7 @@ def step_report(ctx: Ctx) -> ReportArtifact:
     business = ctx.outputs["business"]
     project = ctx.analysis.project
 
+    language = ctx.analysis.report_language or "en"
     if settings.agents_enabled():
         from . import agents
 
@@ -293,6 +294,7 @@ def step_report(ctx: Ctx) -> ReportArtifact:
             layout,
             moodboard,
             business,
+            language,
         )
         narrative = wire.model_dump()
     else:
@@ -328,11 +330,12 @@ def step_report(ctx: Ctx) -> ReportArtifact:
         business=business,
         heatmap_png=heatmap_png,
         moodboard_pngs=moodboard_pngs,
+        language=language,
     )
     key = storage.save(pdf_mod.html_to_pdf(html), ".pdf")
     return ReportArtifact(
         report_key=key,
-        language="en",
+        language=language,
         sections=["summary", "zones", "flow", "layout", "design", "next_steps", "assumptions"],
     )
 

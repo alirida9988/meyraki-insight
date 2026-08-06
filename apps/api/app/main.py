@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -142,6 +144,7 @@ class AnalysisIn(BaseModel):
     footfall_upload_id: str | None = None
     objectives: list[Objective] = Field(min_length=1)
     brief: str | None = Field(None, max_length=2000)
+    report_language: Literal["en", "ar"] = "en"
 
 
 def _run_in_background(analysis_id: str) -> None:
@@ -175,6 +178,7 @@ def start_analysis(
         project_id=project_id,
         objectives=[o.value for o in body.objectives],
         brief=body.brief,
+        report_language=body.report_language,
         floorplan_upload_id=body.floorplan_upload_id,
         footfall_upload_id=body.footfall_upload_id,
     )

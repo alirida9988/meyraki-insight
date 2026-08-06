@@ -58,8 +58,58 @@ FONTS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">'
     '<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500'
     "&family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1"
+    "&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Amiri:ital@0;1"
     '&display=swap" rel="stylesheet">'
 )
+
+# docs/02-DESIGN-SYSTEM.md §8: IBM Plex Sans Arabic for body, Amiri as display serif.
+AR_CSS = """
+body{font-family:'IBM Plex Sans Arabic','Instrument Sans',system-ui,sans-serif}
+h1,h2,.serif,.num{font-family:'Amiri','Instrument Serif',Georgia,serif}
+.dim .lbl{letter-spacing:0}
+"""
+
+# Static section labels per language. Latin numerals stay per the design system.
+LABELS = {
+    "en": {
+        "doc": "Méyraki Insight · Spatial Intelligence Report",
+        "summary": "Executive summary",
+        "score": "FLOW EFFICIENCY · 0–100",
+        "zones_mapped": "ZONES MAPPED",
+        "scenarios_n": "SCENARIOS",
+        "s1": "01 · The space",
+        "s2": "02 · Guest flow",
+        "s3": "03 · Layout scenarios",
+        "s4": "04 · Design direction",
+        "s5": "05 · Next steps",
+        "assumptions": "Assumptions",
+        "zones": "zones",
+        "options": "options",
+        "ramp": "cool → hot",
+        "th": ("Zone", "Category", "Area share", "Flow intensity"),
+        "confidence": "confidence",
+        "materials": "MATERIALS",
+    },
+    "ar": {
+        "doc": "ميراكي إنسايت · تقرير الذكاء المكاني",
+        "summary": "الملخص التنفيذي",
+        "score": "كفاءة الحركة · 0–100",
+        "zones_mapped": "مناطق مرسومة",
+        "scenarios_n": "سيناريوهات",
+        "s1": "01 · المساحة",
+        "s2": "02 · حركة الضيوف",
+        "s3": "03 · سيناريوهات التخطيط",
+        "s4": "04 · الاتجاه التصميمي",
+        "s5": "05 · الخطوات التالية",
+        "assumptions": "الافتراضات",
+        "zones": "منطقة",
+        "options": "خيارات",
+        "ramp": "بارد → ساخن",
+        "th": ("المنطقة", "الفئة", "نسبة المساحة", "كثافة الحركة"),
+        "confidence": "الثقة",
+        "materials": "الخامات",
+    },
+}
 
 
 def _dim(label: str, right: str = "") -> str:
@@ -80,8 +130,11 @@ def build_html(
     business: dict,
     heatmap_png: bytes | None,
     moodboard_pngs: list[bytes] | None = None,
+    language: str = "en",
 ) -> str:
     e = escape
+    L = LABELS.get(language, LABELS["en"])
+    rtl = language == "ar"
     # Defensive over plain-dict inputs (review F6): None values never crash escape().
     n = {k: (v if isinstance(v, str) else "") for k, v in (narrative or {}).items()}
     next_steps = [s for s in (narrative or {}).get("next_steps") or [] if isinstance(s, str)]
@@ -100,7 +153,7 @@ def build_html(
     scenario_cards = "".join(
         '<div class="card">'
         f'<p style="font-weight:600">{e(s.name)} '
-        f'<span class="mono muted" style="font-size:7.5pt">· confidence {round(s.confidence * 100)}%</span></p>'
+        f'<span class="mono muted" style="font-size:7.5pt">· {e(L["confidence"])} {round(s.confidence * 100)}%</span></p>'
         + "".join(
             f'<p style="font-size:9pt;margin:4px 0"><b>{e(m.description)}</b> '
             f'<span class="muted">— {e(m.rationale)}</span></p>'
@@ -149,60 +202,60 @@ def build_html(
         f"<span>{today}</span></div>"
     )
 
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>Meyraki Insight — {e(project_name)}</title>{FONTS}<style>{CSS}</style></head><body>
+    return f"""<!DOCTYPE html><html lang="{e(language)}" dir="{'rtl' if rtl else 'ltr'}"><head><meta charset="utf-8">
+<title>Meyraki Insight — {e(project_name)}</title>{FONTS}<style>{CSS}{AR_CSS if rtl else ""}</style></head><body>
 
 <section class="page">
-  {_dim("Méyraki Insight · Spatial Intelligence Report", today)}
+  {_dim(L["doc"], today)}
   <div style="margin-top:22mm">
     <p class="mono muted" style="font-size:8pt;letter-spacing:.14em;text-transform:uppercase" dir="auto">
       {e(client_name or "Client")} · {e(space_type)}</p>
     <h1 dir="auto">{e(project_name)}</h1>
   </div>
   <div style="margin-top:14mm;max-width:150mm">
-    {_dim("Executive summary")}
+    {_dim(L["summary"])}
     <p style="font-size:11pt" dir="auto">{e(n.get("executive_summary", ""))}</p>
   </div>
   <div style="margin-top:12mm;display:flex;gap:14mm;align-items:flex-end">
     <div><p class="num">{score}</p>
-      <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">FLOW EFFICIENCY · 0–100</p></div>
+      <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">{e(L["score"])}</p></div>
     <div><p class="num">{len(graph.zones)}</p>
-      <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">ZONES MAPPED</p></div>
+      <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">{e(L["zones_mapped"])}</p></div>
     <div><p class="num">{len(layout.scenarios)}</p>
-      <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">SCENARIOS</p></div>
+      <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">{e(L["scenarios_n"])}</p></div>
   </div>
   {footer}
 </section>
 
 <section class="page">
-  {_dim("01 · The space", f"{len(graph.zones)} zones")}
+  {_dim(L["s1"], f"{len(graph.zones)} {L['zones']}")}
   <p style="max-width:150mm" dir="auto">{e(n.get("zone_findings", ""))}</p>
-  <table style="margin-top:6mm"><tr><th>Zone</th><th>Category</th><th>Area share</th><th>Flow intensity</th></tr>
+  <table style="margin-top:6mm"><tr>{''.join(f'<th>{e(h)}</th>' for h in L['th'])}</tr>
   {zone_rows}</table>
-  <div style="margin-top:8mm">{_dim("02 · Guest flow", "cool → hot")}
+  <div style="margin-top:8mm">{_dim(L["s2"], L["ramp"])}
   <p style="max-width:150mm" dir="auto">{e(n.get("flow_findings", ""))}</p>
   {heatmap_html}</div>
   {footer}
 </section>
 
 <section class="page">
-  {_dim("03 · Layout scenarios", f"{len(layout.scenarios)} options")}
+  {_dim(L["s3"], f"{len(layout.scenarios)} {L['options']}")}
   <p style="max-width:150mm" dir="auto">{e(n.get("layout_recommendation", ""))}</p>
   <div style="margin-top:5mm">{scenario_cards}</div>
   {footer}
 </section>
 
 <section class="page">
-  {_dim("04 · Design direction", moodboard.style_name)}
+  {_dim(L["s4"], moodboard.style_name)}
   <p style="max-width:150mm" dir="auto">{e(n.get("design_direction", ""))}</p>
   {renders_html}
   <div style="margin-top:5mm">{swatches}</div>
   <p style="margin-top:5mm;font-size:9.5pt"><span class="mono muted" style="font-size:7.5pt;
-  letter-spacing:.12em">MATERIALS · </span>{e(", ".join(moodboard.materials))}</p>
+  letter-spacing:.12em">{e(L["materials"])} · </span>{e(", ".join(moodboard.materials))}</p>
   {f'<p class="muted" style="font-size:9.5pt">{e(moodboard.lighting_concept)}</p>' if moodboard.lighting_concept else ""}
-  <div style="margin-top:10mm">{_dim("05 · Next steps")}
+  <div style="margin-top:10mm">{_dim(L["s5"])}
   {steps}</div>
-  <div style="margin-top:10mm">{_dim("Assumptions")}
+  <div style="margin-top:10mm">{_dim(L["assumptions"])}
   {assumptions}</div>
   {footer}
 </section>

@@ -53,6 +53,7 @@ class Analysis(Base):
     # queued | running | done | failed | rejected
     objectives: Mapped[list] = mapped_column(JSON, default=list)
     brief: Mapped[str | None] = mapped_column(Text, default=None)
+    report_language: Mapped[str] = mapped_column(String(2), default="en")  # "en" | "ar"
     floorplan_upload_id: Mapped[str] = mapped_column(String(32))
     footfall_upload_id: Mapped[str | None] = mapped_column(String(32), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)

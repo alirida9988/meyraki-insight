@@ -96,3 +96,23 @@ def test_analysis_validates_upload_ownership(client, project_id):
         json={"floorplan_upload_id": "nonexistent", "objectives": ["guest_flow"]},
     )
     assert r.status_code == 422
+
+
+def test_analysis_accepts_report_language(client, project_id):
+    plan = client.post(
+        f"/projects/{project_id}/uploads",
+        params={"kind": "floorplan"},
+        files={"file": ("p.png", PNG_MAGIC, "image/png")},
+    ).json()
+    r = client.post(
+        f"/projects/{project_id}/analyses",
+        json={"floorplan_upload_id": plan["id"], "objectives": ["guest_flow"],
+              "report_language": "ar"},
+    )
+    assert r.status_code == 201
+    bad = client.post(
+        f"/projects/{project_id}/analyses",
+        json={"floorplan_upload_id": plan["id"], "objectives": ["guest_flow"],
+              "report_language": "fr"},
+    )
+    assert bad.status_code == 422

@@ -121,3 +121,34 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
 
   await page.screenshot({ path: "e2e/results-full-analysis.png", fullPage: true });
 });
+
+test("Arabic report: full analysis with report_language=ar", async ({ page }) => {
+  test.skip(!process.env.E2E_AR, "Arabic full run is opt-in (E2E_AR=1) — extra model spend");
+  await page.goto("/projects");
+  await page.getByPlaceholder("Project name").fill(`${unique} AR`);
+  await page.getByPlaceholder("Client (optional)").fill("فندق كليو");
+  await page.locator("select").selectOption("hotel");
+  await page.getByRole("button", { name: "Create project" }).click();
+  await expect(page.getByText(`Analysis · ${unique} AR`)).toBeVisible();
+
+  await page
+    .locator('input[type="file"][accept=".png,.jpg,.jpeg,.pdf"]')
+    .setInputFiles(fixture("cleo_plan.png"));
+  await expect(page.getByText(/CLEO_PLAN\.PNG ✓/i)).toBeVisible();
+
+  // Language toggle: Arabic selected, styling reflects it
+  const arChip = page.getByTestId("report-lang-ar");
+  await arChip.click();
+  await expect(arChip).toHaveClass(/border-viridian/);
+
+  await page.getByRole("button", { name: "Generate insights" }).click();
+  await expect(page.locator("span.dim-label", { hasText: "done" }).first()).toBeVisible({
+    timeout: 240_000,
+  });
+
+  const download = page.getByTestId("report-download");
+  await expect(download).toBeVisible();
+  const pdf = await page.request.get((await download.getAttribute("href"))!);
+  expect(pdf.status()).toBe(200);
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+});
