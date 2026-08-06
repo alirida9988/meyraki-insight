@@ -5,11 +5,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/** Pure fetch (no state) so an effect can call it without a lint escape hatch. */
+const fetchProjects = (): Promise<Project[]> =>
+  apiFetch("/projects").then((r) => r.json());
+
 const apiFetch = async (path: string, init?: RequestInit) => {
   const r = await fetch(`${API}${path}`, { credentials: "include", ...init });
   if (r.status === 401) {
     // A dead cookie must never leave the page silently spinning or polling
-    // forever against 401s (review m10).
+    // forever against 401s (review m10). A hard navigation is deliberate here:
+    // router.push() would keep this component — and its intervals and event
+    // stream — alive with state belonging to a session that no longer exists.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = "/login";
     throw new Error("unauthenticated");
   }
@@ -128,26 +135,32 @@ export default function ProjectsPage() {
     }
   }
 
-  function loadProjects() {
-    setLoadState("loading");
-    apiFetch("/projects")
-      .then((r) => r.json())
-      .then((list) => {
-        setProjects(list);
-        setLoadState("ready");
-      })
-      .catch((err) => {
-        if (err?.message !== "unauthenticated") setLoadState("error");
-      });
+  function applyProjects(list: Project[]) {
+    setProjects(list);
+    setLoadState("ready");
+  }
+
+  function handleLoadError(err: unknown) {
+    // A 401 already navigated to /login; anything else is a real load failure.
+    if ((err as Error)?.message !== "unauthenticated") setLoadState("error");
   }
 
   useEffect(() => {
-    loadProjects();
+    // setState lives in the async callbacks, never in the effect body, and the
+    // cancelled flag keeps a late response from writing to an unmounted page.
+    let cancelled = false;
+    fetchProjects()
+      .then((list) => {
+        if (!cancelled) applyProjects(list);
+      })
+      .catch((err) => {
+        if (!cancelled) handleLoadError(err);
+      });
     return () => {
+      cancelled = true;
       esRef.current?.close();
       stopPolling();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** Populate the results panel from the server for any analysis id. */
@@ -377,7 +390,13 @@ export default function ProjectsPage() {
           {loadState === "error" ? (
             <div className="mt-4 rounded-sheet border border-hairline bg-surface p-3 text-sm">
               <p className="text-graphite">Couldn&apos;t reach the server — your projects are safe, but we can&apos;t load them right now.</p>
-              <button onClick={loadProjects} className="mt-2 rounded-sheet border border-hairline px-3 py-1.5 text-sm hover:border-graphite">
+              <button
+                onClick={() => {
+                  setLoadState("loading"); // an event handler is the right place for this
+                  fetchProjects().then(applyProjects).catch(handleLoadError);
+                }}
+                className="mt-2 min-h-10 rounded-sheet border border-hairline px-3 py-1.5 text-sm hover:border-graphite"
+              >
                 Try again
               </button>
             </div>

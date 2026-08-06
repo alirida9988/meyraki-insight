@@ -13,12 +13,44 @@ branded PDF report out. MENA/GCC launch focus, Arabic/RTL is a differentiator.
 - `docs/04-REUSE-MAP.md` — vetted GitHub repos/APIs to reuse instead of building
 - `docs/05-BUILD-PLAN.md` — phased implementation plan
 
+## How we work — the verification ritual (founder directive, non-negotiable)
+
+Nothing is "done" until it has survived all four layers. Run `/ship-check` (see
+`.claude/skills/ship-check/`) before any completion claim.
+
+1. **Unit — offline, deterministic.** `apps/api/.venv/bin/python -m pytest tests
+   ../../packages/contracts/tests -q`. Never calls a model (`MEYRAKI_USE_AGENTS=off`
+   in `tests/conftest.py`). Every confirmed bug gets a regression test here, named
+   for the finding, so it can never come back silently.
+2. **Live QA hunt — what a real user actually does.** `tests/qa_hunt.py` against the
+   running stack with real agents: oversized 300 DPI scans, phone-photo JPEGs,
+   architect PDFs, grayscale scanner output, European semicolon CSVs, UTF-16 Excel
+   exports, double-clicks, refreshes. This layer has found bugs that 73 unit tests
+   and 3 E2E scenarios never touched — it is not optional.
+3. **Playwright E2E — the real browser, the real stack.** `apps/web/e2e`. Assert what
+   the user *sees*, not what the DOM contains: images must be decoded
+   (`naturalWidth > 0`), PDFs must start with `%PDF-`, cross-org access must 404.
+4. **Adversarial review agents.** After every milestone, launch independent reviewers
+   (backend/DB, frontend/UX, security, contracts) whose brief is to *break* the work —
+   kill mid-run, poison inputs, race it, spoof uploads, leak keys. Fix every confirmed
+   finding, add its regression test, then re-run their own repros.
+
+Working rules that came out of real failures:
+- **Evidence before fixes.** Reproduce first; a fix without a repro is a guess.
+- **Root cause, not the symptom.** Fix it where all callers route through.
+- **A test that lies is worse than no test.** When a check fails, first ask whether the
+  product or the fixture is wrong (synthetic box-diagrams being rejected as "not a
+  floorplan" was the Intake Agent working correctly).
+- **Degrade, never fail the run.** Optional enrichment (renders, heatmaps, fonts) must
+  fall back with a *visible* note in the pipeline register — never silently, never fatally.
+- **Check `docs/04-REUSE-MAP.md` before writing anything a vetted repo already does.**
+  Recommendations rot into fiction if nobody adopts them: mark adopted rows **ADOPTED**
+  with the module that uses them.
+- **CI runs layers 1 only** (`.github/workflows/ci.yml`) — layers 2–4 cost model credits
+  and run locally before a claim. Never let a paid call into the pytest suite.
+- Report outcomes faithfully: what was checked, what was found, what is still open.
+
 ## Rules
-- **Never claim "done/verified" from happy-path checks alone.** After every milestone
-  or substantial change, launch independent verification agents (backend/DB, frontend/
-  UX, pipeline/contracts) that actively try to break the work — kill mid-run, poison
-  inputs, race conditions, spoofed uploads, UI state bugs — and fix confirmed findings
-  before reporting completion. (Founder directive 2026-08-05 after a bug slipped through.)
 - The product name is **Meyraki Insight** (sometimes misheard as "Mirakel").
 - Agent pipeline outputs are typed JSON contracts validated at every step; never let a
   step consume unvalidated model output.
