@@ -29,6 +29,7 @@ from meyraki_contracts import (
     Point,
     QAVerdict,
     ReportArtifact,
+    SCORE_EXCLUDED,
     Scenario,
     StepBudget,
     Track,
@@ -245,29 +246,32 @@ def step_moodboard(ctx: Ctx) -> Moodboard:
     )
 
 
-# Guest-facing zones drive the flow-efficiency score; back-of-house is excluded.
-BACK_OF_HOUSE = {
-    ZoneCategory.KITCHEN,
-    ZoneCategory.STORAGE,
-    ZoneCategory.SERVICE,
-    ZoneCategory.RESTROOM,
-    ZoneCategory.STAIRS,
-    ZoneCategory.ELEVATOR,
-}
-
-
 def flow_efficiency_score(graph: ZoneGraph, flow: FlowReport) -> float | None:
     """Area-weighted mean flow intensity across guest-facing zones, on 0-100.
-    Deterministic math — the model never invents this number."""
+    Deterministic math — the model never invents this number.
+
+    Intensities arrive normalised against the busiest zone on the whole plan, which
+    is what the heatmap needs: a packed kitchen really is the hottest room. But the
+    score covers only guest-facing zones, and mixing the two made the headline number
+    swing ~19 points when a single excluded zone was re-typed, with every intensity
+    identical. So the score re-normalises inside the set it actually scores: it reads
+    "how evenly is the guest space used, relative to its own busiest room", and the
+    assumption below says exactly that.
+    """
     from .geometry import polygon_area
 
     intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
+    scored = [z for z in graph.zones if z.category not in SCORE_EXCLUDED]
+    if not scored:
+        return None  # nothing guest-facing on this plan; a note explains it
+    peak = max((intensity.get(z.id, 0.0) for z in scored), default=0.0)
+    if peak <= 0:
+        return 0.0  # guest space with no traffic at all is a finding, not a gap
+
     weighted = total = 0.0
-    for zone in graph.zones:
-        if zone.category in BACK_OF_HOUSE:
-            continue
+    for zone in scored:
         area = polygon_area(zone.polygon)
-        weighted += area * intensity.get(zone.id, 0.0)
+        weighted += area * (intensity.get(zone.id, 0.0) / peak)
         total += area
     if total == 0:
         return None
@@ -278,10 +282,12 @@ def step_business(ctx: Ctx) -> BusinessCase:
     graph = ZoneGraph.model_validate(ctx.outputs["zones"])
     flow = FlowReport.model_validate(ctx.outputs["flow"])
     score = flow_efficiency_score(graph, flow)
+    excluded = ", ".join(sorted(c.value for c in SCORE_EXCLUDED))
     assumptions = [
         Assumption(
             statement="Flow Efficiency Score = area-weighted mean flow intensity across "
-            "guest-facing zones (back-of-house excluded), scaled to 0-100.",
+            "guest-facing zones, measured relative to the busiest guest-facing zone and "
+            f"scaled to 0-100. Excluded zone types: {excluded}.",
             source="deterministic",
         ),
         Assumption(
@@ -298,6 +304,14 @@ def step_business(ctx: Ctx) -> BusinessCase:
             source="preset",
         ),
     ]
+    if score is None:
+        _emit(
+            ctx.session,
+            ctx.analysis.id,
+            "step",
+            "Flow Efficiency Score not computed: this plan has no guest-facing zone "
+            "with measurable traffic (every zone is back-of-house or utility).",
+        )
     return BusinessCase(flow_efficiency_score=score, assumptions=assumptions)
 
 

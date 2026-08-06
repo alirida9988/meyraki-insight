@@ -11,7 +11,7 @@ import io
 import unicodedata
 from collections import deque
 
-from meyraki_contracts import FlowReport, Track, ZoneFlow, ZoneGraph
+from meyraki_contracts import SCORE_EXCLUDED, FlowReport, Track, ZoneFlow, ZoneGraph
 
 BOTTLENECK_AT = 0.8
 DEAD_ZONE_AT = 0.2
@@ -34,7 +34,10 @@ def data_driven(graph: ZoneGraph, footfall_csv: bytes) -> FlowReport:
 
     by_key: dict[str, str] = {}
     for z in graph.zones:
-        for candidate in (z.label, z.id, z.category.value):
+        # Label and id only. The category was a join key too, which meant a CSV row
+        # named "storage" landed on whichever zone was typed storage first rather
+        # than on the room actually called that — measured traffic on the wrong room.
+        for candidate in (z.label, z.id):
             by_key.setdefault(_norm(candidate), z.id)
 
     zone_totals: dict[str, int] = {z.id: 0 for z in graph.zones}
@@ -56,22 +59,21 @@ def data_driven(graph: ZoneGraph, footfall_csv: bytes) -> FlowReport:
         if unmatched
         else []
     )
-    return _report(Track.DATA_DRIVEN, flows, notes)
+    return _report(Track.DATA_DRIVEN, flows, notes, graph)
 
 
 def simulated(graph: ZoneGraph) -> FlowReport:
     """Pedestrian dynamics when the geometry allows it, distance decay otherwise."""
     from . import pedestrian
 
-    result = pedestrian.simulate(graph)
-    if result is not None:
-        intensities, notes = result
+    intensities, notes, reason = pedestrian.simulate(graph)
+    if intensities is not None:
         flows = [_flow(zid, value) for zid, value in intensities.items()]
-        return _report(Track.SIMULATED, flows, notes)
-    return distance_decay(graph)
+        return _report(Track.SIMULATED, flows, notes, graph)
+    return distance_decay(graph, reason)
 
 
-def distance_decay(graph: ZoneGraph) -> FlowReport:
+def distance_decay(graph: ZoneGraph, reason: str | None = None) -> FlowReport:
     """Fallback: intensity falls with adjacency-graph distance from an entrance."""
     depth: dict[str, int] = {e: 0 for e in graph.entrances}
     neighbors: dict[str, list[str]] = {z.id: [] for z in graph.zones}
@@ -92,11 +94,11 @@ def distance_decay(graph: ZoneGraph) -> FlowReport:
         for z in graph.zones
     ]
     notes = [
-        "Simulated flow (distance decay from entrances, used because the traced "
-        "geometry could not form a walkable surface for pedestrian simulation) — "
-        "upload footfall data for measured intensities."
+        "Simulated flow (distance decay from entrances"
+        + (f", used because {reason}" if reason else "")
+        + ") — upload footfall data for measured intensities."
     ]
-    return _report(Track.SIMULATED, flows, notes)
+    return _report(Track.SIMULATED, flows, notes, graph)
 
 
 def _flow(zone_id: str, intensity: float) -> ZoneFlow:
@@ -109,11 +111,22 @@ def _flow(zone_id: str, intensity: float) -> ZoneFlow:
     )
 
 
-def _report(track: Track, flows: list[ZoneFlow], notes: list[str]) -> FlowReport:
+def _report(
+    track: Track, flows: list[ZoneFlow], notes: list[str], graph: ZoneGraph | None = None
+) -> FlowReport:
+    # dead_zones feeds the Layout Optimizer and the Report Writer, both of which are
+    # briefed to cite them as opportunities. A back-of-house or utility zone sitting
+    # at zero is doing its job, so it must not reach that list — but it stays in
+    # zone_flows, because the heatmap draws every zone.
+    advisable = {z.id for z in graph.zones if z.category not in SCORE_EXCLUDED} if graph else None
     return FlowReport(
         track=track,
         zone_flows=flows,
         bottlenecks=[f.zone_id for f in flows if f.is_bottleneck],
-        dead_zones=[f.zone_id for f in flows if f.is_dead_zone],
+        dead_zones=[
+            f.zone_id
+            for f in flows
+            if f.is_dead_zone and (advisable is None or f.zone_id in advisable)
+        ],
         notes=notes,
     )

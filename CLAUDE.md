@@ -15,7 +15,7 @@ branded PDF report out. MENA/GCC launch focus, Arabic/RTL is a differentiator.
 
 ## How we work — the verification ritual (founder directive, non-negotiable)
 
-Nothing is "done" until it has survived all four layers. Run `/ship-check` (see
+Nothing is "done" until it has survived every layer that applies. Run `/ship-check` (see
 `.claude/skills/ship-check/`) before any completion claim.
 
 1. **Unit — offline, deterministic.** `apps/api/.venv/bin/python -m pytest tests
@@ -27,10 +27,17 @@ Nothing is "done" until it has survived all four layers. Run `/ship-check` (see
    architect PDFs, grayscale scanner output, European semicolon CSVs, UTF-16 Excel
    exports, double-clicks, refreshes. This layer has found bugs that 73 unit tests
    and 3 E2E scenarios never touched — it is not optional.
-3. **Playwright E2E — the real browser, the real stack.** `apps/web/e2e`. Assert what
+3. **Golden-set drift benchmark — the model's judgement, pinned.**
+   `tests/golden_set.py` scores labelled plans in `tests/golden/` against the
+   properties a correct reading must have. Run it before *and* after touching any
+   prompt, model id, or the repair layer: unit tests pin code you wrote, this pins
+   behaviour you don't control. A prompt edit that helps one plan and breaks another
+   is invisible to every other layer. A failed check is a question — open the plan
+   image and decide whether the label or the product is wrong.
+4. **Playwright E2E — the real browser, the real stack.** `apps/web/e2e`. Assert what
    the user *sees*, not what the DOM contains: images must be decoded
    (`naturalWidth > 0`), PDFs must start with `%PDF-`, cross-org access must 404.
-4. **Adversarial review agents.** After every milestone, launch independent reviewers
+5. **Adversarial review agents.** After every milestone, launch independent reviewers
    (backend/DB, frontend/UX, security, contracts) whose brief is to *break* the work —
    kill mid-run, poison inputs, race it, spoof uploads, leak keys. Fix every confirmed
    finding, add its regression test, then re-run their own repros.
@@ -46,7 +53,7 @@ Working rules that came out of real failures:
 - **Check `docs/04-REUSE-MAP.md` before writing anything a vetted repo already does.**
   Recommendations rot into fiction if nobody adopts them: mark adopted rows **ADOPTED**
   with the module that uses them.
-- **CI runs layers 1 only** (`.github/workflows/ci.yml`) — layers 2–4 cost model credits
+- **CI runs layer 1 only** (`.github/workflows/ci.yml`) — layers 2–5 cost model credits
   and run locally before a claim. Never let a paid call into the pytest suite.
 - Report outcomes faithfully: what was checked, what was found, what is still open.
 

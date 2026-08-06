@@ -7,6 +7,7 @@ Sonnet 5 (high-res vision) for the Zone Analyst.
 """
 
 import anthropic
+import pydantic
 from pydantic import BaseModel, Field
 
 from meyraki_contracts import (
@@ -67,12 +68,33 @@ def _plan_block(plan_bytes: bytes) -> dict:
 
 
 def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseModel]):
-    response = client().messages.parse(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": content}],
-        output_format=output_format,
-    )
+    # The one chokepoint every agent routes through, so the kill switch lives here.
+    # MEYRAKI_USE_AGENTS=off used to be honoured only by the pipeline, which meant a
+    # test calling an agent directly would happily bill a real key from .env.
+    if not settings.agents_enabled():
+        raise RuntimeError(
+            "model call attempted while agents are disabled (MEYRAKI_USE_AGENTS=off "
+            "or no API key) — the offline suite must never reach the network"
+        )
+    try:
+        response = client().messages.parse(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": content}],
+            output_format=output_format,
+        )
+    except pydantic.ValidationError as exc:
+        # messages.parse() validates inside the SDK call, so a response truncated at
+        # max_tokens surfaces here as "Invalid JSON: EOF while parsing" long before the
+        # stop_reason check below can explain it. Arabic reports hit this first: the
+        # same text costs several times more tokens than its English equivalent.
+        truncated = "EOF while parsing" in str(exc) or "Invalid JSON" in str(exc)
+        detail = (
+            f"output truncated at max_tokens={max_tokens} — raise the step's budget"
+            if truncated
+            else "output did not satisfy the contract"
+        )
+        raise RuntimeError(f"{model}: {detail} ({output_format.__name__})") from exc
     if response.stop_reason == "refusal":
         raise AgentRefusal(f"{model} declined the request")
     if response.stop_reason == "max_tokens":
@@ -167,6 +189,9 @@ Rules:
 - category must be one of: {", ".join(c.value for c in ZoneCategory)}.
 - Use labels written on the plan when present (any language); otherwise name the zone
   by its evident function (furniture, fixtures).
+- Classify by function, not by wording: a café/restaurant/breakfast room is dining,
+  a beverage counter is bar, an office or desk area is workspace. Use "other" only
+  when the function genuinely cannot be determined.
 - adjacency lists pairs of zones connected by a door or open passage.
 - entrances lists zones with a door to the outside of the building.
 - Cover the full walkable floor area; skip wall voids and shafts.
@@ -189,6 +214,15 @@ def repair_zone_graph(wire: WireZoneGraph) -> ZoneGraph:
     Clamps coordinates, coerces unknown categories to OTHER, dedupes ids, drops
     degenerate polygons and dangling references — then ZoneGraph's own validator
     has the final word.
+
+    It deliberately does NOT guess a category from the zone's printed label. That was
+    tried and reverted: the prompt change at ZONES_PROMPT ("classify by function, not
+    by wording") fixed the café-typed-as-other case on its own, while keyword matching
+    mis-filed a GCC VIP majlis ("صالة كبار" contains "بار") as a bar, "Stockholm Suite"
+    as storage, and a swimming pool ("حمام سباحة") as a restroom — each of which
+    deletes a guest zone from the flow score and the simulation. OTHER is a safe
+    default; a wrong category is not. tests/golden_set.py is what catches a
+    regression here.
     """
     zones: list[Zone] = []
     seen: set[str] = set()
@@ -484,6 +518,9 @@ def generate_moodboard_images(
 # ---------------------------------------------------------------- Report Writer
 
 REPORT_MODEL = "claude-sonnet-5"
+# 4096 was enough for English and truncated Arabic mid-sentence (caught by the
+# Arabic E2E run): the same report costs several times more tokens in Arabic.
+REPORT_MAX_TOKENS = 16000
 
 
 class WireReport(BaseModel):
@@ -551,4 +588,4 @@ Rules:
 - Ground every claim in the data above; no invented numbers.
 - Where flow is simulated, say so plainly once.
 - next_steps must be actions the client can schedule, ordered by leverage."""
-    return _parse(REPORT_MODEL, 4096, [{"type": "text", "text": prompt}], WireReport)
+    return _parse(REPORT_MODEL, REPORT_MAX_TOKENS, [{"type": "text", "text": prompt}], WireReport)

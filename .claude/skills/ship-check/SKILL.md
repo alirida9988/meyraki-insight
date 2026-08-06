@@ -37,6 +37,42 @@ imagine a new way a user could hold it wrong.
 Content-judged paths must use a real plan (`apps/web/e2e/fixtures/cleo_plan.png`) —
 the Intake Agent correctly rejects synthetic box diagrams, and that is not a bug.
 
+## Layer 2b — Golden-set drift benchmark (any prompt, model id, or repair-layer change)
+
+```bash
+cd apps/api && .venv/bin/python tests/golden_set.py --save
+```
+
+Labelled plans in `tests/golden/` with the properties a correct reading must have.
+Exit 0 pass · 1 fail · **2 inconclusive** (the API was throttled or unreachable — not a
+model regression, so never report it as one). `--save` writes
+`artifacts/golden_set_report.json`.
+
+Unit tests pin down code you wrote; this pins down behaviour you don't control. Run it
+*before and after* touching a prompt or a model id — a prompt edit that improves one
+plan and quietly breaks another is invisible to every other layer.
+
+**Hard checks are not negotiable.** Intake quality, the rejection sentence, required
+categories, and "the model actually classified the rooms" fail the run outright at any
+score. A percentage over N checks cannot express "this must never happen": accepting a
+bar chart as a floorplan was worth 8% and passed comfortably.
+
+**A failed check is a question, not a verdict.** Open the plan image and decide whether
+the label or the product is wrong. Both have happened here:
+- *Product wrong:* two rooms printed "CAFÉ" came back as `other`, costing the café 5x
+  guest attraction in the flow simulation and the wrong usable share in the solver. The
+  fix was three lines of prompt ("classify by function, not by wording"). A keyword
+  table was also written, then **reverted** — a review proved it typed a GCC VIP majlis
+  as a bar (`صالة كبار` contains `بار`) and a swimming pool as a restroom. Verify which
+  half of a two-part fix actually worked before keeping both.
+- *Label wrong:* a coworking plan was labelled "entrance not drawn" while the model kept
+  finding one, and a 0.7m unlabelled wall gap was too ambiguous to assert either way.
+  The fixture was redrawn with double doors and a threshold line.
+
+Ground truth must be true by construction — `tests/golden/make_plans.py` asserts every
+caption sits inside its own room, because a hand-placed version had put KITCHEN and
+STORE in the same room.
+
 ## Layer 3 — Playwright E2E (any change the user can see)
 
 ```bash
@@ -60,7 +96,8 @@ types, leak artifact keys, poison model output, exhaust quotas. Then:
 
 ## Before reporting
 
-- [ ] All four layers run, with the numbers to quote (e.g. "89 offline, 4/4 live E2E").
+- [ ] Every applicable layer run, with the numbers to quote (e.g. "100 offline, golden
+      set 24/24, 4/4 live E2E").
 - [ ] Deliverables copied into `artifacts/` (report PDFs, heatmaps, screenshots).
 - [ ] Servers stopped; `git status` clean; commit message states what was verified.
 - [ ] Anything still open is named plainly — never implied to be finished.
