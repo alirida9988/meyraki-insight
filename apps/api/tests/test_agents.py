@@ -202,3 +202,42 @@ def test_run_layout_keeps_first_when_retry_is_worse(monkeypatch):
     monkeypatch.setattr(agents, "_parse", fake_parse)
     result = agents.run_layout(graph, flow, [Objective.GUEST_FLOW], "hotel", None)
     assert [s.id for s in result.scenarios] == ["only_one"]
+
+
+# Review F4: a failing retry never discards a valid first attempt
+
+def test_run_layout_retry_failure_falls_back_to_first(monkeypatch):
+    from app import agents
+    from app.flow import simulated
+    from meyraki_contracts import Objective
+
+    graph = _graph_two_zones()
+    flow = simulated(graph)
+    calls = {"n": 0}
+
+    def fake_parse(model, max_tokens, content, output_format):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return WireLayout(scenarios=[_ws("only_one", ["lobby"])])
+        raise agents.AgentRefusal("declined")
+
+    monkeypatch.setattr(agents, "_parse", fake_parse)
+    result = agents.run_layout(graph, flow, [Objective.GUEST_FLOW], "hotel", None)
+    assert [s.id for s in result.scenarios] == ["only_one"]
+
+
+def test_run_layout_refusal_with_no_first_attempt_propagates(monkeypatch):
+    import pytest as _pytest
+    from app import agents
+    from app.flow import simulated
+    from meyraki_contracts import Objective
+
+    graph = _graph_two_zones()
+    flow = simulated(graph)
+
+    def fake_parse(model, max_tokens, content, output_format):
+        raise agents.AgentRefusal("declined")
+
+    monkeypatch.setattr(agents, "_parse", fake_parse)
+    with _pytest.raises(agents.AgentRefusal):
+        agents.run_layout(graph, flow, [Objective.GUEST_FLOW], "hotel", None)

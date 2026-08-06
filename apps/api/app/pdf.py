@@ -11,7 +11,14 @@ def html_to_pdf(html: str) -> bytes:
             browser = p.chromium.launch(headless=True)  # bundled chromium fallback
         try:
             page = browser.new_page()
-            page.set_content(html, wait_until="networkidle")  # let web fonts settle
+            # domcontentloaded, then a BOUNDED best-effort wait for web fonts:
+            # a blackholed font host must degrade to fallback fonts, never fail
+            # the analysis after the paid model calls succeeded (review F1).
+            page.set_content(html, wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=10_000)
+            except Exception:
+                pass  # fonts unavailable — system fallbacks render instead
             return page.pdf(
                 format="A4",
                 print_background=True,

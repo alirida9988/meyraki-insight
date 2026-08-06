@@ -312,12 +312,19 @@ Produce 2-3 DISTINCT scenarios. Rules:
         "after validation. Moves whose zone_ids are not EXACTLY the ids listed above are "
         "discarded. Produce 2-3 distinct scenarios, every move using exact zone ids."
     )
+    # A failing RETRY must never discard a valid first attempt (review F4);
+    # with no first attempt, the retry's error is the real signal — propagate it.
+    if first is not None:
+        try:
+            second = attempt(retry_prompt)
+        except Exception:
+            return first
+        return max((first, second) if second is not None else (first,),
+                   key=lambda p: len(p.scenarios))
     second = attempt(retry_prompt)
-    best = max((p for p in (first, second) if p is not None),
-               key=lambda p: len(p.scenarios), default=None)
-    if best is None:
+    if second is None:
         raise RuntimeError("Layout Optimizer produced no scenario with valid zone references")
-    return best
+    return second
 
 
 def repair_layout(

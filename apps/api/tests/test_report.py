@@ -73,3 +73,21 @@ def test_report_html_without_heatmap_or_score():
     html = build_html(**fx)
     assert "data:image/png" not in html
     assert ">—<" in html
+
+
+# Review F6/F7 (2026-08-06): defensive narrative handling + bidi-safe direction
+
+def test_report_html_survives_none_narrative_values_and_string_score():
+    fx = _fixtures()
+    fx["narrative"] = {"executive_summary": None, "next_steps": None}
+    fx["business"] = {"flow_efficiency_score": "<script>x</script>", "assumptions": ["not-a-dict"]}
+    html = build_html(**fx)
+    assert "<script>" not in html
+    assert 'dir="auto"' in html
+
+
+def test_report_html_arabic_direction_attribute():
+    fx = _fixtures()
+    fx["project_name"] = "فندق كليو"
+    html = build_html(**fx)
+    assert '<h1 dir="auto">فندق كليو</h1>' in html

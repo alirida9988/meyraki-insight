@@ -27,7 +27,12 @@ def extract_image(data: dict) -> bytes:
     for part in parts:
         blob = part.get("inlineData") or part.get("inline_data")
         if blob and blob.get("data"):
-            return base64.b64decode(blob["data"])
+            # validate=True: malformed base64 must fail loudly, never silently
+            # produce an empty/corrupt image file (review F5).
+            image = base64.b64decode(blob["data"], validate=True)
+            if not image:
+                raise RuntimeError("Gemini returned an empty image payload")
+            return image
     reason = candidates[0].get("finishReason", "unknown")
     raise RuntimeError(f"Gemini returned no image (finishReason: {reason})")
 

@@ -82,9 +82,13 @@ def build_html(
     moodboard_pngs: list[bytes] | None = None,
 ) -> str:
     e = escape
+    # Defensive over plain-dict inputs (review F6): None values never crash escape().
+    n = {k: (v if isinstance(v, str) else "") for k, v in (narrative or {}).items()}
+    next_steps = [s for s in (narrative or {}).get("next_steps") or [] if isinstance(s, str)]
     intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
     today = date.today().isoformat()
-    score = business.get("flow_efficiency_score")
+    raw_score = business.get("flow_efficiency_score")
+    score = e(str(raw_score)) if raw_score is not None else "—"
 
     zone_rows = "".join(
         f"<tr><td>{e(z.label)}</td><td>{e(z.category.value)}</td>"
@@ -132,13 +136,13 @@ def build_html(
 
     assumptions = "".join(
         f'<p style="font-size:8.5pt" class="muted">· {e(a.get("statement", ""))}</p>'
-        for a in business.get("assumptions", [])
+        for a in business.get("assumptions", []) if isinstance(a, dict)
     )
 
     steps = "".join(
         f'<p style="font-size:9.5pt;margin:3px 0"><span class="mono" style="color:var(--viridian)">'
         f"{i + 1:02d}</span>&nbsp; {e(s)}</p>"
-        for i, s in enumerate(narrative.get("next_steps", []))
+        for i, s in enumerate(next_steps)
     )
     footer = (
         f'<div class="foot"><span>Méyraki Insight — {e(project_name)}</span>'
@@ -151,16 +155,16 @@ def build_html(
 <section class="page">
   {_dim("Méyraki Insight · Spatial Intelligence Report", today)}
   <div style="margin-top:22mm">
-    <p class="mono muted" style="font-size:8pt;letter-spacing:.14em;text-transform:uppercase">
+    <p class="mono muted" style="font-size:8pt;letter-spacing:.14em;text-transform:uppercase" dir="auto">
       {e(client_name or "Client")} · {e(space_type)}</p>
-    <h1>{e(project_name)}</h1>
+    <h1 dir="auto">{e(project_name)}</h1>
   </div>
   <div style="margin-top:14mm;max-width:150mm">
     {_dim("Executive summary")}
-    <p style="font-size:11pt">{e(narrative.get("executive_summary", ""))}</p>
+    <p style="font-size:11pt" dir="auto">{e(n.get("executive_summary", ""))}</p>
   </div>
   <div style="margin-top:12mm;display:flex;gap:14mm;align-items:flex-end">
-    <div><p class="num">{score if score is not None else "—"}</p>
+    <div><p class="num">{score}</p>
       <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">FLOW EFFICIENCY · 0–100</p></div>
     <div><p class="num">{len(graph.zones)}</p>
       <p class="mono muted" style="font-size:7.5pt;letter-spacing:.1em">ZONES MAPPED</p></div>
@@ -172,25 +176,25 @@ def build_html(
 
 <section class="page">
   {_dim("01 · The space", f"{len(graph.zones)} zones")}
-  <p style="max-width:150mm">{e(narrative.get("zone_findings", ""))}</p>
+  <p style="max-width:150mm" dir="auto">{e(n.get("zone_findings", ""))}</p>
   <table style="margin-top:6mm"><tr><th>Zone</th><th>Category</th><th>Area share</th><th>Flow intensity</th></tr>
   {zone_rows}</table>
   <div style="margin-top:8mm">{_dim("02 · Guest flow", "cool → hot")}
-  <p style="max-width:150mm">{e(narrative.get("flow_findings", ""))}</p>
+  <p style="max-width:150mm" dir="auto">{e(n.get("flow_findings", ""))}</p>
   {heatmap_html}</div>
   {footer}
 </section>
 
 <section class="page">
   {_dim("03 · Layout scenarios", f"{len(layout.scenarios)} options")}
-  <p style="max-width:150mm">{e(narrative.get("layout_recommendation", ""))}</p>
+  <p style="max-width:150mm" dir="auto">{e(n.get("layout_recommendation", ""))}</p>
   <div style="margin-top:5mm">{scenario_cards}</div>
   {footer}
 </section>
 
 <section class="page">
   {_dim("04 · Design direction", moodboard.style_name)}
-  <p style="max-width:150mm">{e(narrative.get("design_direction", ""))}</p>
+  <p style="max-width:150mm" dir="auto">{e(n.get("design_direction", ""))}</p>
   {renders_html}
   <div style="margin-top:5mm">{swatches}</div>
   <p style="margin-top:5mm;font-size:9.5pt"><span class="mono muted" style="font-size:7.5pt;

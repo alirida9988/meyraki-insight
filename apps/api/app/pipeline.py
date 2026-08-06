@@ -302,8 +302,20 @@ def step_report(ctx: Ctx) -> ReportArtifact:
     from . import pdf as pdf_mod
     from . import report_html
 
-    heatmap_png = storage.load(flow.heatmap_key) if flow.heatmap_key else None
-    moodboard_pngs = [storage.load(k) for k in moodboard.image_keys[:3]]
+    # Tolerant loads (review F2): a vanished artifact file must degrade the report,
+    # not fail it — flow/moodboard steps are 'done' and resume would re-fail forever.
+    def optional_load(key: str | None) -> bytes | None:
+        if not key:
+            return None
+        try:
+            return storage.load(key)
+        except (FileNotFoundError, ValueError):
+            _emit(ctx.session, ctx.analysis.id, "step",
+                  f"report: stored artifact {key[:12]}… missing — continuing without it")
+            return None
+
+    heatmap_png = optional_load(flow.heatmap_key)
+    moodboard_pngs = [png for k in moodboard.image_keys[:3] if (png := optional_load(k))]
     html = report_html.build_html(
         project_name=project.name,
         client_name=project.client_name,

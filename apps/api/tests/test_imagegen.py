@@ -69,3 +69,11 @@ def test_moodboard_images_skipped_without_key(monkeypatch):
 
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
     assert agents.generate_moodboard_images("Style", ["oak"], "hotel", _graph()) == ([], [])
+
+
+# Review F5: malformed base64 must be loud, never a silent empty file
+
+def test_extract_image_malformed_base64_raises():
+    bad = {"candidates": [{"content": {"parts": [{"inlineData": {"data": "!!!not-base64!!!"}}]}}]}
+    with pytest.raises(Exception):
+        extract_image(bad)

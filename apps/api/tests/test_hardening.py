@@ -188,3 +188,18 @@ def test_resume_after_crash_still_rejects_non_floorplan(client, project_id):
     assert d["error"] == "This looks like a photo, not a floorplan."
     steps = {s["name"]: s["status"] for s in d["steps"]}
     assert steps["zones"] == "pending"  # nothing past intake ever ran
+
+
+# Review F3 (2026-08-06): missing report file must 404, never 500
+def test_download_report_missing_file_404(client, project_id):
+    aid = _analysis(client, project_id)
+    _wait_done(client, aid)
+    with SessionLocal() as s:
+        a = s.get(Analysis, aid)
+        for step in a.steps:
+            if step.name == "report":
+                step.output = {"report_key": "deadbeef00.pdf", "language": "en", "sections": []}
+        s.commit()
+    r = client.get(f"/analyses/{aid}/report.pdf")
+    assert r.status_code == 404
+    assert "no longer available" in r.json()["detail"]

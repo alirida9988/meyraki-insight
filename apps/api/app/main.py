@@ -250,8 +250,12 @@ def download_report(analysis_id: str, session: Session = Depends(get_session)) -
     key = (report_step.output or {}).get("report_key") if report_step else None
     if not key:
         raise HTTPException(404, "Report not ready for this analysis")
+    try:
+        content = storage.load(key)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "Report file no longer available — re-run the analysis")
     return Response(
-        content=storage.load(key),
+        content=content,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="meyraki-insight-{analysis_id[:8]}.pdf"'},
     )
