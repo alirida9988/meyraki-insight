@@ -17,6 +17,7 @@ dependencies = [
     "anthropic>=0.60",
     "playwright>=1.45",
     "bcrypt>=4.1",
+    "jupedsim>=1.4",  # LGPL-3.0, unmodified pip dependency (docs/04 §3)
 ]
 
 [project.optional-dependencies]

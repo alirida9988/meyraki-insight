@@ -1,9 +1,9 @@
 """Flow Analyst — the real implementation (M2).
 
 Data-driven track: joins the uploaded footfall CSV onto detected zones.
-Simulated track: distance-decay from entrances over the zone adjacency graph.
-# ponytail: BFS distance-decay simulation; upgrade to JuPedSim pedestrian dynamics
-# when scenario-level movement fidelity matters (see docs/04-REUSE-MAP.md §3).
+Simulated track: JuPedSim pedestrian dynamics (app/pedestrian.py), falling back
+to BFS distance-decay over the adjacency graph when the traced geometry cannot
+form a walkable surface. Both paths say which one produced the numbers.
 """
 
 import csv
@@ -60,6 +60,19 @@ def data_driven(graph: ZoneGraph, footfall_csv: bytes) -> FlowReport:
 
 
 def simulated(graph: ZoneGraph) -> FlowReport:
+    """Pedestrian dynamics when the geometry allows it, distance decay otherwise."""
+    from . import pedestrian
+
+    result = pedestrian.simulate(graph)
+    if result is not None:
+        intensities, notes = result
+        flows = [_flow(zid, value) for zid, value in intensities.items()]
+        return _report(Track.SIMULATED, flows, notes)
+    return distance_decay(graph)
+
+
+def distance_decay(graph: ZoneGraph) -> FlowReport:
+    """Fallback: intensity falls with adjacency-graph distance from an entrance."""
     depth: dict[str, int] = {e: 0 for e in graph.entrances}
     neighbors: dict[str, list[str]] = {z.id: [] for z in graph.zones}
     for a, b in graph.adjacency:
@@ -78,7 +91,11 @@ def simulated(graph: ZoneGraph) -> FlowReport:
         _flow(z.id, max(0.15, 1.0 - 0.25 * depth[z.id]) if z.id in depth else 0.15)
         for z in graph.zones
     ]
-    notes = ["Simulated flow (distance decay from entrances) — upload footfall data for measured intensities."]
+    notes = [
+        "Simulated flow (distance decay from entrances, used because the traced "
+        "geometry could not form a walkable surface for pedestrian simulation) — "
+        "upload footfall data for measured intensities."
+    ]
     return _report(Track.SIMULATED, flows, notes)
 
 

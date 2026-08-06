@@ -36,7 +36,7 @@
 
 | Repo | License | Score | Use |
 |---|---|---|---|
-| [JuPedSim](https://github.com/PedestrianDynamics/jupedsim) — Jülich, pushed today | LGPL-3.0 ⚠ | 5 | **Adopt.** `pip install jupedsim`: walkable polygons from ZoneGraph → agents with goals → validated pedestrian dynamics; pairs with PedPy for density/flow metrics feeding our heatmaps. Keep as unmodified dependency. |
+| [JuPedSim](https://github.com/PedestrianDynamics/jupedsim) — Jülich | LGPL-3.0 ⚠ | 5 | **ADOPTED** (`app/pedestrian.py`) — unmodified pip dependency, imported in-process. Zone polygons → one walkable surface → guests spawned at entrances with weighted destinations → per-zone dwell sampling. Finds funnel zones distance-decay cannot (all journeys crossing one lobby). Deterministic; degrades to `flow.distance_decay` with a visible note when the traced geometry cannot form a walkable surface. `pip install jupedsim`: walkable polygons from ZoneGraph → agents with goals → validated pedestrian dynamics; pairs with PedPy for density/flow metrics feeding our heatmaps. Keep as unmodified dependency. |
 | [PySocialForce](https://github.com/yuxiang-gao/PySocialForce) ~183★ | MIT | 4 | ~2k-LOC social-force fallback we'd fully own if JuPedSim's LGPL bothers counsel. |
 | [mesa](https://github.com/projectmesa/mesa) ~3.8k★ | Apache-2.0 | 3 | Only if we later model rich guest *behavior* (order → seat → dwell), not just movement. |
 | [People-Counting-in-Real-Time](https://github.com/saimj7/People-Counting-in-Real-Time) ~615★ | MIT | 3 | Phase-3 IoT path reference (camera footfall). Swap its dated SSD for an Apache-licensed detector (RT-DETR) — **not** AGPL Ultralytics heatmaps, unless we buy their enterprise license. |

@@ -41,8 +41,8 @@ def test_data_driven_joins_accents_and_flags_unmatched():
     assert any("rooftop" in n for n in report.notes)
 
 
-def test_simulated_decays_from_entrance():
-    report = flow.simulated(_graph())
+def test_distance_decay_falls_off_from_the_entrance():
+    report = flow.distance_decay(_graph())
     by_zone = {f.zone_id: f.intensity for f in report.zone_flows}
     assert by_zone["entrance"] == 1.0
     assert by_zone["lobby"] == 0.75
