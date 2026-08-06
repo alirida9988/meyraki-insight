@@ -25,8 +25,11 @@ cd apps/web && pnpm install && pnpm dev
 cd apps/api && python3 -m venv .venv && .venv/bin/pip install -e ../../packages/contracts -e ".[dev]"
 .venv/bin/uvicorn app.main:app --reload
 
-# tests
-apps/api/.venv/bin/python -m pytest packages/contracts/tests
+# tests — offline, no model calls, no network
+cd apps/api && .venv/bin/python -m pytest tests ../../packages/contracts/tests -q
+
+# model-behaviour drift benchmark — labelled plans, real agents, costs credits
+cd apps/api && .venv/bin/python tests/golden_set.py --save
 ```
 
 ## Branch flow
@@ -41,8 +44,8 @@ main                     always green, always deployable
 ```
 
 Before merging anything: run the verification ritual (`/ship-check`, or
-`CLAUDE.md` § How we work). Layers 2–4 (live QA hunt, Playwright E2E,
-adversarial review) cost model credits and run locally, not in CI.
+`CLAUDE.md` § How we work). Layers 2–5 (live QA hunt, golden-set drift benchmark,
+Playwright E2E, adversarial review) cost model credits and run locally, not in CI.
 
 ## Deployment requirements (security)
 

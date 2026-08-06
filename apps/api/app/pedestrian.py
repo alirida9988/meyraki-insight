@@ -15,7 +15,7 @@ imported in-process, never modified or statically linked (docs/04 §3).
 
 import time
 
-from meyraki_contracts import ZoneCategory, ZoneGraph
+from meyraki_contracts import BACK_OF_HOUSE, ZoneCategory, ZoneGraph
 
 PLAN_LONG_EDGE_M = 30.0   # nominal hospitality floor plate; assumption is reported
 MAX_AGENTS = 120
@@ -36,7 +36,6 @@ ATTRACTION = {
     ZoneCategory.RESTROOM: 1.5,
     ZoneCategory.CORRIDOR: 0.5,
 }
-BACK_OF_HOUSE = {ZoneCategory.KITCHEN, ZoneCategory.STORAGE, ZoneCategory.SERVICE}
 
 
 def _zone_polygons(graph: ZoneGraph):
@@ -83,22 +82,28 @@ def _seed_point(poly, walkable):
     return (point.x, point.y)
 
 
-def simulate(graph: ZoneGraph) -> tuple[dict[str, float], list[str]] | None:
-    """({zone_id: intensity 0-1}, notes) from pedestrian dynamics, or None.
+Outcome = tuple[dict[str, float] | None, list[str], str | None]
 
-    Returning None is a normal outcome (unusable geometry, missing dependency,
-    budget exceeded) — the caller falls back to distance decay with a note.
+
+def simulate(graph: ZoneGraph) -> Outcome:
+    """(intensities, notes, reason). intensities is None when the simulation declined.
+
+    Declining is a normal outcome, so the third element says *why* in a sentence fit
+    for the client's report: the caller used to assert "the geometry could not form a
+    walkable surface" no matter the actual cause, which was often simply untrue.
     """
     try:
         import jupedsim as jps
     except Exception:
-        return None
+        return None, [], "the pedestrian simulation engine is unavailable on this server"
 
     try:
         polygons = _zone_polygons(graph)
         walkable = _walkable(polygons)
         if walkable is None or len(polygons) < 2:
-            return None
+            return None, [], (
+                "the traced zones could not be joined into one walkable floor surface"
+            )
 
         entrances = [z for z in graph.entrances if z in polygons]
         if not entrances:  # no entrance traced: start from the largest zone
@@ -111,7 +116,10 @@ def simulate(graph: ZoneGraph) -> tuple[dict[str, float], list[str]] | None:
             and next((z.category for z in graph.zones if z.id == zid), None) not in BACK_OF_HOUSE
         ]
         if not destinations:
-            return None
+            return None, [], (
+                "no guest-facing destination was detected on the plan — every zone is "
+                "back-of-house or an entrance"
+            )
 
         simulation = jps.Simulation(
             model=jps.CollisionFreeSpeedModel(), geometry=walkable, dt=0.05
@@ -129,7 +137,7 @@ def simulate(graph: ZoneGraph) -> tuple[dict[str, float], list[str]] | None:
             journey = jps.JourneyDescription([waypoint, exit_stage])
             journeys.append((simulation.add_journey(journey), waypoint))
         if not journeys:
-            return None
+            return None, [], "no walkable route was found between the entrance and any zone"
 
         weights = [
             ATTRACTION.get(
@@ -174,7 +182,9 @@ def simulate(graph: ZoneGraph) -> tuple[dict[str, float], list[str]] | None:
             except Exception:
                 continue  # too close to another agent or a wall
         if placed < 5:
-            return None
+            return None, [], (
+                "too few guests could be placed inside the traced entrance to simulate"
+            )
 
         # Run, sampling where agents actually are.
         from shapely.strtree import STRtree
@@ -201,7 +211,7 @@ def simulate(graph: ZoneGraph) -> tuple[dict[str, float], list[str]] | None:
 
         peak = max(dwell.values()) if dwell else 0
         if peak == 0:
-            return None
+            return None, [], "no guest reached a destination within the simulated time"
         intensities = {zid: round(count / peak, 3) for zid, count in dwell.items()}
         for zone in graph.zones:  # zones dropped as invalid still need a value
             intensities.setdefault(zone.id, 0.0)
@@ -211,6 +221,7 @@ def simulate(graph: ZoneGraph) -> tuple[dict[str, float], list[str]] | None:
             f"Plan scaled to a nominal {PLAN_LONG_EDGE_M:.0f} m long edge (no scale bar "
             f"was detected), so intensities are relative, not absolute counts.",
         ]
-        return intensities, notes
-    except Exception:
-        return None  # any simulation fault degrades to distance decay
+        return intensities, notes, None
+    except Exception as exc:
+        # Any simulation fault degrades to distance decay, but says what happened.
+        return None, [], f"the pedestrian simulation could not complete ({type(exc).__name__})"

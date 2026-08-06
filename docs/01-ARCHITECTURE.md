@@ -105,6 +105,18 @@ LLM only *explain* the numbers. Output `BusinessCase`: ROI per sqm current vs pr
 Guest Flow Efficiency Score, payback estimate, assumptions list (always shown — no
 black-box numbers in front of an investor or client).
 
+> **Flow Efficiency Score, defined precisely** (2026-08-06): the area-weighted mean flow
+> intensity across guest-facing zones, *measured relative to the busiest guest-facing
+> zone*, scaled to 0–100. The relative part is load-bearing. Intensities reach this step
+> normalised against the busiest zone on the whole plan, which is what the heatmap needs
+> — a packed kitchen genuinely is the hottest room — but the score excludes back-of-house
+> and utility zones. Mixing the two let the scale be set by a zone the score ignored, so
+> re-typing one excluded room moved the client's headline number by ~19 points with every
+> intensity unchanged. Excluded types live in one place, `meyraki_contracts.SCORE_EXCLUDED`
+> (= `BACK_OF_HOUSE | UTILITY_ZONES`), and are named in the report's assumptions. No
+> guest-facing zone at all → no score plus a register note; guest zones at zero traffic →
+> a score of 0, which is a finding rather than a gap.
+
 **(6) Report Writer** — composes the client-facing narrative in brand voice (EN/AR),
 then deterministic HTML→PDF assembly with the client's name/logo.
 

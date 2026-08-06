@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   api:
-    name: API · contracts · 89 offline tests
+    name: API · contracts · offline suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,9 +35,18 @@ jobs:
           MEYRAKI_RATELIMIT: "off"
         run: python -m pytest tests ../../packages/contracts/tests -q
 
-      - name: Guard — no live-network test slipped into the offline suite
+      - name: Guard — the offline suite cannot reach a model, even with a key present
         working-directory: apps/api
+        env:
+          # A real key plus agents disabled: if any test tries to call a model, the
+          # guard in agents._parse must stop it. This is the check that matters —
+          # MEYRAKI_USE_AGENTS=off used to be honoured only by the pipeline, so a
+          # test calling an agent directly would have billed a developer's key.
+          ANTHROPIC_API_KEY: "sk-ant-not-a-real-key-guard-test"
+          MEYRAKI_USE_AGENTS: "off"
+          MEYRAKI_RATELIMIT: "off"
         run: |
+          python -m pytest tests ../../packages/contracts/tests -q
           if grep -rn "qa_hunt" tests/test_*.py; then
             echo "::error::the live QA hunt must stay opt-in, not in the pytest suite"
             exit 1

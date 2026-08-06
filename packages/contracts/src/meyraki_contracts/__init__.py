@@ -51,6 +51,23 @@ class ZoneCategory(StrEnum):
     OTHER = "other"
 
 
+# Two different questions, so two sets — they used to be three copies in three modules
+# that quietly disagreed about restrooms, stairs and lifts.
+BACK_OF_HOUSE: frozenset[ZoneCategory] = frozenset(
+    {ZoneCategory.KITCHEN, ZoneCategory.STORAGE, ZoneCategory.SERVICE}
+)
+"""Staff-only. Never a guest destination in a flow simulation."""
+
+UTILITY_ZONES: frozenset[ZoneCategory] = frozenset(
+    {ZoneCategory.RESTROOM, ZoneCategory.STAIRS, ZoneCategory.ELEVATOR}
+)
+"""Guests do go here, but traffic through a lavatory or a lift core is not a measure
+of how well the space performs, so these sit outside the flow-efficiency score."""
+
+SCORE_EXCLUDED: frozenset[ZoneCategory] = BACK_OF_HOUSE | UTILITY_ZONES
+"""Excluded from the Flow Efficiency Score. Named in the report's assumptions."""
+
+
 # ---------------------------------------------------------------- step 1: intake
 
 class PlanQuality(StrEnum):

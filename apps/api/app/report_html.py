@@ -116,6 +116,33 @@ LABELS = {
 }
 
 
+# Zone categories are shown to the client, so they are translated like every other
+# label. Keys are ZoneCategory values; a category missing here falls back to its raw
+# value rather than blanking the cell.
+CATEGORY_LABELS = {
+    "en": {
+        "entrance": "Entrance", "reception": "Reception", "lobby": "Lobby",
+        "lounge": "Lounge", "dining": "Dining", "bar": "Bar", "kitchen": "Kitchen",
+        "corridor": "Corridor", "stairs": "Stairs", "elevator": "Elevator",
+        "restroom": "Restroom", "terrace": "Terrace", "workspace": "Workspace",
+        "meeting": "Meeting room", "storage": "Storage", "service": "Service",
+        "other": "Unclassified",
+    },
+    "ar": {
+        "entrance": "مدخل", "reception": "استقبال", "lobby": "ردهة",
+        "lounge": "صالة جلوس", "dining": "مطعم", "bar": "بار", "kitchen": "مطبخ",
+        "corridor": "ممر", "stairs": "سلالم", "elevator": "مصعد",
+        "restroom": "دورة مياه", "terrace": "شرفة", "workspace": "مساحة عمل",
+        "meeting": "قاعة اجتماعات", "storage": "مخزن", "service": "خدمات",
+        "other": "غير مصنّفة",
+    },
+}
+
+
+def _category(value: str, lang: str) -> str:
+    return CATEGORY_LABELS.get(lang, CATEGORY_LABELS["en"]).get(value, value)
+
+
 def _dim(label: str, right: str = "") -> str:
     r = f'<span class="lbl">{escape(right)}</span>' if right else ""
     return f'<div class="dim"><span class="lbl">{escape(label)}</span><span class="ln"></span>{r}</div>'
@@ -148,7 +175,7 @@ def build_html(
     score = e(str(raw_score)) if raw_score is not None else "—"
 
     zone_rows = "".join(
-        f"<tr><td>{e(z.label)}</td><td>{e(z.category.value)}</td>"
+        f"<tr><td>{e(z.label)}</td><td>{e(_category(z.category.value, language))}</td>"
         f"<td>{round(polygon_area(z.polygon) * 100, 1)}%</td>"
         f"<td>{intensity.get(z.id, 0.0)}</td></tr>"
         for z in graph.zones
