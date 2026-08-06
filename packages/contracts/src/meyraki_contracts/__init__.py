@@ -165,6 +165,11 @@ class LayoutMove(BaseModel):
     description: str
     zone_ids: list[str]
     rationale: str
+    footprint_pct: float | None = Field(
+        None, ge=0, le=100,
+        description="Share of the target zone's floor area this move occupies; "
+        "0/None for signage, policy or wayfinding changes.",
+    )
 
 
 class Scenario(BaseModel):
@@ -175,7 +180,9 @@ class Scenario(BaseModel):
     """e.g. {"guest_flow": "+15%", "idle_wait": "-3 min"}"""
     confidence: float = Field(ge=0, le=1)
     solver_feasible: bool = False
-    """Set True only after OR-Tools validates constraints; UI badges this."""
+    """Set by the OR-Tools CP-SAT check (app/solver.py), never by the model."""
+    solver_notes: list[str] = []
+    """Human-readable verdict: what fits, or which moves conflict and why."""
 
 
 class LayoutProposals(BaseModel):

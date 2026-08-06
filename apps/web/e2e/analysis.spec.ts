@@ -140,7 +140,51 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
   expect(body.subarray(0, 5).toString()).toBe("%PDF-");
   expect(body.length).toBeGreaterThan(50_000); // embedded heatmap => substantial file
 
+  // Every scenario carries a real constraint-solver verdict (OR-Tools CP-SAT)
+  const verdicts = page.getByTestId("solver-verdict");
+  expect(await verdicts.count()).toBeGreaterThanOrEqual(2);
+  await expect(verdicts.first()).toHaveText(/constraint solver/);
+
   await page.screenshot({ path: "e2e/results-full-analysis.png", fullPage: true });
+
+  // A refresh must not lose the analysis (QA hunt bug: there was no history at all)
+  await page.reload();
+  await page.getByRole("button", { name: new RegExp(unique) }).first().click();
+  const history = page.getByTestId("analysis-history");
+  await expect(history).toBeVisible();
+  await history.getByRole("button").first().click();
+  await expect(page.getByTestId("flow-score")).toBeVisible();
+  await expect(page.getByAltText(/guest-flow heatmap/i)).toBeVisible();
+  await expect(page.getByTestId("report-download")).toBeVisible();
+});
+
+test("PDF floorplan: full analysis with a rendered heatmap", async ({ page }) => {
+  test.skip(!process.env.E2E_PDF, "PDF full run is opt-in (E2E_PDF=1) — extra model spend");
+  await signUp(page, "pdf");
+  await page.getByPlaceholder("Project name").fill(`${unique} PDF`);
+  await page.locator("select").selectOption("cafe");
+  await page.getByRole("button", { name: "Create project" }).click();
+  await expect(page.getByText(`Analysis · ${unique} PDF`)).toBeVisible();
+
+  await page
+    .locator('input[type="file"][accept=".png,.jpg,.jpeg,.pdf"]')
+    .setInputFiles(fixture("plan.pdf"));
+  await expect(page.getByText(/PLAN\.PDF ✓/i)).toBeVisible();
+
+  await page.getByRole("button", { name: "Generate insights" }).click();
+  await expect(page.locator("span.dim-label", { hasText: "done" }).first()).toBeVisible({
+    timeout: 240_000,
+  });
+
+  // The heatmap is the point: PDFs used to produce none (pypdfium2 now rasterizes)
+  const heatmap = page.getByAltText(/guest-flow heatmap/i);
+  await expect(heatmap).toBeVisible();
+  const decoded = await heatmap.evaluate(
+    (img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0
+  );
+  expect(decoded).toBe(true);
+  await expect(page.getByTestId("report-download")).toBeVisible();
+  await page.screenshot({ path: "e2e/results-pdf-analysis.png", fullPage: true });
 });
 
 test("Arabic report: full analysis with report_language=ar", async ({ page }) => {

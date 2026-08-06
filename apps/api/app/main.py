@@ -309,6 +309,33 @@ def start_analysis(
     return {"id": analysis.id, "status": analysis.status}
 
 
+@app.get("/projects/{project_id}/analyses")
+def list_analyses(
+    project_id: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> list[dict]:
+    """Analysis history for a project — what a user comes back to after a refresh."""
+    _own_project(session, user, project_id)
+    rows = session.scalars(
+        select(Analysis)
+        .where(Analysis.project_id == project_id)
+        .order_by(Analysis.created_at.desc())
+        .limit(50)
+    ).all()
+    return [
+        {
+            "id": a.id,
+            "status": a.status,
+            "objectives": a.objectives,
+            "report_language": a.report_language,
+            "created_at": a.created_at.isoformat(),
+            "error": a.error,
+        }
+        for a in rows
+    ]
+
+
 @app.get("/analyses/{analysis_id}")
 def get_analysis(
     analysis_id: str,

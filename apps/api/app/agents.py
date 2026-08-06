@@ -49,16 +49,20 @@ class AgentRefusal(RuntimeError):
 
 
 def _plan_block(plan_bytes: bytes) -> dict:
-    """Image block for PNG/JPEG, document block for PDF (both vision-readable)."""
+    """Vision block for a plan: PDFs go as documents, rasters are normalized
+    first (a 300 DPI A1 scan exceeds the API's 8000px limit outright)."""
     import base64
 
-    data = base64.standard_b64encode(plan_bytes).decode()
-    if plan_bytes.startswith(b"%PDF-"):
+    from . import imaging
+
+    kind, payload = imaging.vision_payload(plan_bytes)
+    data = base64.standard_b64encode(payload).decode()
+    if kind == "document":
         return {
             "type": "document",
             "source": {"type": "base64", "media_type": "application/pdf", "data": data},
         }
-    media = "image/png" if plan_bytes.startswith(b"\x89PNG") else "image/jpeg"
+    media = "image/png" if payload.startswith(b"\x89PNG") else "image/jpeg"
     return {"type": "image", "source": {"type": "base64", "media_type": media, "data": data}}
 
 
@@ -231,6 +235,10 @@ class WireMove(BaseModel):
     description: str = Field(description="one concrete physical change")
     zone_ids: list[str] = Field(description="ids of the zones this move touches")
     rationale: str = Field(description="why, grounded in the flow data")
+    footprint_pct: float = Field(
+        description="percentage of the target zone's floor area this move occupies "
+        "(0 for signage, policy, wayfinding or door-swing changes)"
+    )
 
 
 class WireScenario(BaseModel):
@@ -286,6 +294,10 @@ Produce 2-3 DISTINCT scenarios. Rules:
   banquette"). No vague advice.
 - zone_ids must only use ids from the list above.
 - rationale must cite the flow data (bottleneck, dead zone, adjacency) that motivates it.
+- footprint_pct: honest estimate of how much of that zone's floor the change occupies.
+  A 6-seat banquette in a small lounge might be 25; a wayfinding sign is 0. A
+  constraint solver checks these against each zone's usable area, so inflating them
+  will get the move rejected as infeasible.
 - predicted_effects values are honest estimates and MUST carry their basis, e.g.
   "+10-15% (est. from rebalancing lobby bottleneck)". Never a bare number.
 - Scenario ids: short snake_case. confidence in [0,1] per scenario.
@@ -343,6 +355,7 @@ def repair_layout(
                 description=m.description.strip(),
                 zone_ids=[z for z in (i.strip().lower().replace(" ", "_") for i in m.zone_ids) if z in valid_ids],
                 rationale=m.rationale.strip(),
+                footprint_pct=min(100.0, max(0.0, m.footprint_pct)),
             )
             for m in ws.moves
             if m.description.strip()

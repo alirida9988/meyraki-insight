@@ -86,11 +86,12 @@ def _graph_two_zones():
     return repair_zone_graph(WireZoneGraph(zones=[_wz("lobby"), _wz("cafe")], adjacency=[], entrances=[]))
 
 
-def _ws(sid, zone_ids, name="Scenario"):
+def _ws(sid, zone_ids, name="Scenario", footprint=10.0):
     return WireScenario(
         id=sid,
         name=name,
-        moves=[WireMove(description="Move the desk", zone_ids=zone_ids, rationale="bottleneck")],
+        moves=[WireMove(description="Move the desk", zone_ids=zone_ids,
+                        rationale="bottleneck", footprint_pct=footprint)],
         predicted_effects={"guest_flow": "+10% (est.)"},
         confidence=0.7,
     )
@@ -241,3 +242,13 @@ def test_run_layout_refusal_with_no_first_attempt_propagates(monkeypatch):
     monkeypatch.setattr(agents, "_parse", fake_parse)
     with _pytest.raises(agents.AgentRefusal):
         agents.run_layout(graph, flow, [Objective.GUEST_FLOW], "hotel", None)
+
+
+
+# CP-SAT feasibility is carried through the repair layer (docs/04 §2)
+
+def test_repair_carries_and_clamps_footprint():
+    graph = _graph_two_zones()
+    wire = WireLayout(scenarios=[_ws("a", ["lobby"], footprint=250.0)])
+    move = repair_layout(wire, graph, [Objective.GUEST_FLOW]).scenarios[0].moves[0]
+    assert move.footprint_pct == 100.0  # clamped, never rejected outright

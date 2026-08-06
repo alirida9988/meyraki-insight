@@ -10,7 +10,8 @@
 
 | Repo | License | Score | Use |
 |---|---|---|---|
-| [pdfplumber](https://github.com/jsvine/pdfplumber) ~10.6k★ | MIT | 5 | **Adopt.** Vector-PDF plans → exact wall lines/rects with coordinates, no ML needed. First rung of ingestion: try vector extraction, only rasterize when scanned. |
+| [pdfplumber](https://github.com/jsvine/pdfplumber) ~10.6k★ | MIT | 5 | **ADOPTED** (`app/imaging.py`) — distinguishes a true CAD export from a scan pasted into a PDF (stroke counts), recorded as an intake warning. Vector-PDF plans → exact wall lines/rects with coordinates, no ML needed. First rung of ingestion: try vector extraction, only rasterize when scanned. |
+| [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) | Apache-2.0/BSD | 5 | **ADOPTED** (`app/imaging.py`) — renders PDF plans to raster so vector uploads get a heatmap. No poppler system dependency. |
 | [ezdxf](https://github.com/mozman/ezdxf) ~1.4k★, very active | MIT | 5 | **Adopt (Phase 2).** Production DXF read/query; DWG via free ODA File Converter → DXF → ezdxf. Backbone of the CAD path. |
 | [FloorplanTransformation](https://github.com/art-programmer/FloorplanTransformation) ~672★ | MIT | 3 | Raster→vector pipeline blueprint (junctions → integer programming → vector plan). Mine the algorithm, not the Torch7 code. |
 | [TF2DeepFloorplan](https://github.com/zcemycl/TF2DeepFloorplan) ~268★ | GPL-3.0 ⚠ | 4 | Ready-to-run room-segmentation weights + Docker/Flask. Fallback/cross-check for the vision-LLM Zone Analyst; server-side GPL use viable but get legal sign-off. |
@@ -25,7 +26,7 @@
 | Repo | License | Score | Use |
 |---|---|---|---|
 | [LayoutGPT](https://github.com/weixi-feng/LayoutGPT) ~405★ | MIT | 5 | **Adopt the pattern.** Training-free LLM layout generation via CSS-style in-context exemplars — exactly our Layout Optimizer, re-pointed at Claude with hospitality exemplars. |
-| [OR-Tools](https://github.com/google/or-tools) ~13.9k★, very active | Apache-2.0 | 5 | **Adopt.** CP-SAT validates/repairs LLM layout proposals against hard constraints (clearances, capacity, adjacency, egress). LLM proposes → solver guarantees. |
+| [OR-Tools](https://github.com/google/or-tools) ~13.9k★, very active | Apache-2.0 | 5 | **ADOPTED** (`app/solver.py`) — CP-SAT multi-zone knapsack: the largest subset of a scenario's moves that fits every zone's usable floor at once, egress zones held clear. Sets `solver_feasible` + notes. CP-SAT validates/repairs LLM layout proposals against hard constraints (clearances, capacity, adjacency, egress). LLM proposes → solver guarantees. |
 | [Holodeck](https://github.com/allenai/Holodeck) ~561★ | Apache-2.0 | 4 | Mine its LLM-constraints-then-solver furniture placement module (strip the AI2-THOR/Unity coupling). |
 | [simanneal](https://github.com/perrygeo/simanneal) ~694★ | ISC | 4 | Tiny annealer for continuous furniture-position refinement where CP-SAT is too coarse. |
 
@@ -40,6 +41,7 @@
 | [mesa](https://github.com/projectmesa/mesa) ~3.8k★ | Apache-2.0 | 3 | Only if we later model rich guest *behavior* (order → seat → dwell), not just movement. |
 | [People-Counting-in-Real-Time](https://github.com/saimj7/People-Counting-in-Real-Time) ~615★ | MIT | 3 | Phase-3 IoT path reference (camera footfall). Swap its dated SSD for an Apache-licensed detector (RT-DETR) — **not** AGPL Ultralytics heatmaps, unless we buy their enterprise license. |
 
+
 ## 4. Moodboards, rendering, reports, viewers
 
 | Item | License/price | Score | Use |
@@ -50,7 +52,7 @@
 | gpt-image-1.5 (OpenAI) | ~$0.034/img medium | 4 | Fallback provider. (gpt-image-1 retires Oct 2026 — don't build on it.) |
 | [sd-interior-design](https://github.com/alaradirik/sd-interior-design) | MIT | 4 | Reference recipe if we ever self-host: RealisticVision inpaint + MLSD + segmentation ControlNet preserves room geometry while restyling. Runnable on Replicate today. |
 | [node-vibrant](https://github.com/Vibrant-Colors/node-vibrant) ~2.4k★ | MIT | 5 | **Adopt.** Semantic swatches (Vibrant/Muted/…) → moodboard palettes. |
-| [Playwright](https://github.com/microsoft/playwright) `page.pdf()` | Apache-2.0 | 5 | **Adopt.** Branded HTML report → print-quality PDF; reuses the web design system verbatim. [WeasyPrint](https://github.com/Kozea/WeasyPrint) (BSD) = Python-native fallback. |
+| [Playwright](https://github.com/microsoft/playwright) `page.pdf()` | Apache-2.0 | 5 | **ADOPTED** (`app/pdf.py` for reports, `apps/web/e2e` for live E2E). Branded HTML report → print-quality PDF; reuses the web design system verbatim. [WeasyPrint](https://github.com/Kozea/WeasyPrint) (BSD) = Python-native fallback. |
 | [react-planner](https://github.com/cvdlab/react-planner) ~1.5k★ | MIT ⚠ stale | 3 | Best starting point for the Phase-3 interactive layout editor (budget modernization). For view-only previews, plain Konva/react-three-fiber over our ZoneGraph JSON is less work. |
 | [blueprint3d](https://github.com/furnishup/blueprint3d) ~2k★ | MIT, abandoned | 2 | Interaction-model reference only (2D draw → 3D walkthrough). |
 

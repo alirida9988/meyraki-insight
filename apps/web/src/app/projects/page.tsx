@@ -32,6 +32,8 @@ type ScenarioOut = {
   moves: LayoutMove[];
   predicted_effects: Record<string, string>;
   confidence: number;
+  solver_feasible: boolean;
+  solver_notes: string[];
 };
 type MoodboardOut = {
   style_name: string;
@@ -41,6 +43,14 @@ type MoodboardOut = {
   lighting_concept: string | null;
   image_keys: string[];
 };
+type AnalysisSummary = {
+  id: string;
+  status: string;
+  objectives: string[];
+  report_language: string;
+  created_at: string;
+};
+
 type Results = {
   scenarios: ScenarioOut[];
   moodboard: MoodboardOut | null;
@@ -103,6 +113,7 @@ export default function ProjectsPage() {
   const [heatmapKey, setHeatmapKey] = useState<string | null>(null);
   const [results, setResults] = useState<Results | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [history, setHistory] = useState<AnalysisSummary[]>([]);
   const esRef = useRef<EventSource | null>(null);
   // Guards async responses against project switches mid-flight (review finding #2).
   const selectedIdRef = useRef<string | null>(null);
@@ -139,6 +150,51 @@ export default function ProjectsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Populate the results panel from the server for any analysis id. */
+  async function loadAnalysis(id: string, pid: string) {
+    try {
+      const detail = await apiFetch(`/analyses/${id}`).then((res) => res.json());
+      if (selectedIdRef.current !== pid) return detail.status as string;
+      const output = (name: string) =>
+        detail.steps.find((s: { name: string }) => s.name === name)?.output;
+      setStatus(detail.status);
+      setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
+      setAnalysisError(detail.error ?? null);
+      setHeatmapKey(output("flow")?.heatmap_key ?? null);
+      setResults({
+        scenarios: output("layout")?.scenarios ?? [],
+        moodboard: output("moodboard") ?? null,
+        flowScore: output("business")?.flow_efficiency_score ?? null,
+        reportReady: Boolean(output("report")?.report_key),
+        analysisId: id,
+      });
+      return detail.status as string;
+    } catch {
+      return null; // transient — the stream, the poll, or a retry will resync
+    }
+  }
+
+  async function loadHistory(pid: string) {
+    try {
+      const rows = await apiFetch(`/projects/${pid}/analyses`).then((r) => r.json());
+      if (selectedIdRef.current === pid) setHistory(rows);
+    } catch {
+      /* history is a convenience; never block the page on it */
+    }
+  }
+
+  /** Reopen a past analysis — the whole point of the history list. */
+  async function openAnalysis(summary: AnalysisSummary) {
+    if (!selected) return;
+    esRef.current?.close();
+    stopPolling();
+    setFeed([]);
+    await loadAnalysis(summary.id, selected.id);
+    if (summary.status === "running" || summary.status === "queued") {
+      watchAnalysis(summary.id, selected.id); // still in flight: re-attach the live feed
+    }
+  }
+
   function selectProject(p: Project) {
     esRef.current?.close(); // never let another project's stream write here (finding #1)
     esRef.current = null;
@@ -156,6 +212,8 @@ export default function ProjectsPage() {
     setHeatmapKey(null);
     setResults(null);
     setAnalysisError(null);
+    setHistory([]);
+    void loadHistory(p.id);
   }
 
   async function createProject(e: React.FormEvent) {
@@ -248,37 +306,25 @@ export default function ProjectsPage() {
     }
     const { id } = await r.json();
     setStatus("running");
+    void loadHistory(pid);
+    watchAnalysis(id, pid);
+  }
 
-    const syncFromServer = async () => {
-      try {
-        const detail = await apiFetch(`/analyses/${id}`).then((res) => res.json());
-        if (selectedIdRef.current !== pid) return;
-        setStatus(detail.status);
-        setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
-        const output = (name: string) =>
-          detail.steps.find((s: { name: string }) => s.name === name)?.output;
-        setAnalysisError(detail.error ?? null);
-        setHeatmapKey(output("flow")?.heatmap_key ?? null);
-        setResults({
-          scenarios: output("layout")?.scenarios ?? [],
-          moodboard: output("moodboard") ?? null,
-          flowScore: output("business")?.flow_efficiency_score ?? null,
-          reportReady: Boolean(output("report")?.report_key),
-          analysisId: id,
-        });
-        if (["done", "failed", "rejected"].includes(detail.status)) {
-          stopPolling();
-          esRef.current?.close();
-        }
-      } catch {
-        /* transient — the stream, the poll, or a retry will resync */
+  /** Live feed + truth-poll for an in-flight analysis. */
+  function watchAnalysis(id: string, pid: string) {
+    const sync = async () => {
+      const status = await loadAnalysis(id, pid);
+      if (status && ["done", "failed", "rejected"].includes(status)) {
+        stopPolling();
+        esRef.current?.close();
+        void loadHistory(pid);
       }
     };
 
     // Safety net (residual R2): the server is the source of truth even if the
     // event stream never connects. Cheap poll, cleared on terminal status.
     stopPolling();
-    pollRef.current = setInterval(() => void syncFromServer(), 5000);
+    pollRef.current = setInterval(() => void sync(), 5000);
 
     const es = new EventSource(`${API}/analyses/${id}/events`, { withCredentials: true });
     esRef.current = es;
@@ -288,13 +334,13 @@ export default function ProjectsPage() {
       setFeed((f) => [...f, data.message]);
       if (data.kind === "end") {
         es.close();
-        void syncFromServer();
+        void sync();
       }
     };
     es.onerror = () => {
       // EventSource auto-reconnects on transient errors; only when it has given up
       // do we resync the truth from the server — never guess "failed" (finding #3).
-      if (es.readyState === EventSource.CLOSED) void syncFromServer();
+      if (es.readyState === EventSource.CLOSED) void sync();
     };
   }
 
@@ -382,6 +428,31 @@ export default function ProjectsPage() {
           ) : (
             <div className="space-y-8">
               <DimLine label={`Analysis · ${selected.name}`} right={status ?? "not started"} />
+
+              {history.length > 0 && (
+                <div data-testid="analysis-history">
+                  <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+                    Previous analyses
+                  </span>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {history.map((h) => (
+                      <button
+                        key={h.id}
+                        type="button"
+                        onClick={() => void openAnalysis(h)}
+                        className={`min-h-10 rounded-sheet border px-3 py-1.5 text-left font-mono text-xs transition-colors ${
+                          results?.analysisId === h.id
+                            ? "border-viridian bg-viridian-tint text-viridian"
+                            : "border-hairline bg-surface hover:border-graphite"
+                        }`}
+                      >
+                        {new Date(h.created_at).toLocaleString()} · {h.status}
+                        {h.report_language === "ar" ? " · AR" : ""}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
@@ -546,12 +617,23 @@ export default function ProjectsPage() {
                   <div className="mt-3 space-y-3">
                     {results.scenarios.map((s) => (
                       <div key={s.id} className="rounded-sheet border border-hairline bg-surface p-4">
-                        <div className="flex items-baseline justify-between">
+                        <div className="flex items-baseline justify-between gap-3">
                           <h3 className="font-medium">{s.name}</h3>
-                          <span className="font-mono text-xs uppercase text-graphite">
+                          <span className="whitespace-nowrap font-mono text-xs uppercase text-graphite">
                             confidence {Math.round(s.confidence * 100)}%
                           </span>
                         </div>
+                        <p
+                          data-testid="solver-verdict"
+                          className={`mt-1 font-mono text-[11px] uppercase tracking-[0.08em] ${
+                            s.solver_feasible ? "text-viridian" : "text-thermal-text"
+                          }`}
+                          title={(s.solver_notes ?? []).join("\n")}
+                        >
+                          {s.solver_feasible
+                            ? "✓ fits the floor area (constraint solver)"
+                            : "✕ does not fit as proposed (constraint solver)"}
+                        </p>
                         <ul className="mt-2 space-y-2">
                           {s.moves.map((m, i) => (
                             <li key={i} className="text-sm">

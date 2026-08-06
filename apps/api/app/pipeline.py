@@ -87,7 +87,23 @@ def step_intake(ctx: Ctx) -> IntakeManifest:
 
         plan_bytes = ctx.upload_bytes(ctx.analysis.floorplan_upload_id)
         if plan_bytes is not None:
-            return agents.run_intake(plan_bytes, footfall)
+            manifest = agents.run_intake(plan_bytes, footfall)
+            # Deterministic evidence wins over the model's guess for plan_kind:
+            # pdfplumber can see whether the PDF actually carries vector geometry.
+            from . import imaging
+
+            if imaging.is_pdf(plan_bytes):
+                stats = imaging.pdf_vector_stats(plan_bytes)
+                if stats.get("readable"):
+                    kind = PlanKind.VECTOR_PDF if stats["is_vector"] else PlanKind.RASTER
+                    note = (
+                        f"PDF carries {stats['lines']} lines / {stats['rects']} rects — "
+                        + ("true vector export" if stats["is_vector"] else "scanned image inside a PDF")
+                    )
+                    manifest = manifest.model_copy(
+                        update={"plan_kind": kind, "warnings": [*manifest.warnings, note]}
+                    )
+            return manifest
     # Stub fallback (no API key / MEYRAKI_USE_AGENTS=off): trusts the upload validation.
     return IntakeManifest(
         plan_quality=PlanQuality.OK,
@@ -153,7 +169,7 @@ def step_flow(ctx: Ctx) -> FlowReport:
         if png is not None:
             report.heatmap_key = storage.save(png, ".png")
         else:
-            report.notes.append("Heatmap preview unavailable for PDF plans yet — arriving with rasterization (M3).")
+            report.notes.append("The uploaded plan could not be rendered as an image, so no heatmap was produced.")
     return report
 
 
@@ -162,13 +178,24 @@ def step_layout(ctx: Ctx) -> LayoutProposals:
     if settings.agents_enabled():
         from . import agents
 
-        return agents.run_layout(
-            ZoneGraph.model_validate(ctx.outputs["zones"]),
+        graph = ZoneGraph.model_validate(ctx.outputs["zones"])
+        proposals = agents.run_layout(
+            graph,
             FlowReport.model_validate(ctx.outputs["flow"]),
             objectives,
             ctx.analysis.project.space_type,
             ctx.analysis.brief,
         )
+        # The model proposes, CP-SAT decides (docs/01 — "solver guarantees").
+        from . import solver
+
+        checked = solver.validate(proposals, graph)
+        infeasible = [s.name for s in checked.scenarios if not s.solver_feasible]
+        if infeasible:
+            _emit(ctx.session, ctx.analysis.id, "step",
+                  f"layout: {len(infeasible)}/{len(checked.scenarios)} scenarios flagged "
+                  f"infeasible by the constraint solver ({', '.join(infeasible)[:80]})")
+        return checked
     return LayoutProposals(
         objectives=objectives,
         scenarios=[

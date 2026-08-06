@@ -1,8 +1,8 @@
 """Deterministic heatmap renderer — thermal ramp over the client's floorplan image.
 
 Brand contract (docs/02-DESIGN-SYSTEM.md): ramp #2C5F8A → #7FB069 → #E8C547 → #DA4B22,
-soft edges, the plan itself stays the hero. PNG/JPG plans only; PDF plans return None
-until rasterization lands (M3, poppler).
+soft edges, the plan itself stays the hero. Raster and PDF plans are both supported
+(PDFs via pypdfium2 in app/imaging.py).
 """
 
 import io
@@ -24,10 +24,16 @@ def ramp_color(intensity: float) -> tuple[int, int, int]:
 
 
 def render(plan_bytes: bytes, graph: ZoneGraph, flow: FlowReport) -> bytes | None:
+    from . import imaging
+
+    # PDFs are rasterized (pypdfium2) so vector plans get a heatmap too.
+    raster = imaging.plan_raster(plan_bytes)
+    if raster is None:
+        return None  # unreadable plan — caller records no heatmap, never fails
     try:
-        plan = Image.open(io.BytesIO(plan_bytes)).convert("RGBA")
+        plan = Image.open(io.BytesIO(raster)).convert("RGBA")
     except Exception:
-        return None  # not a raster Pillow can read (e.g. PDF) — caller records no heatmap
+        return None
 
     w, h = plan.size
     intensity = {f.zone_id: f.intensity for f in flow.zone_flows}

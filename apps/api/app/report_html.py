@@ -89,6 +89,8 @@ LABELS = {
         "th": ("Zone", "Category", "Area share", "Flow intensity"),
         "confidence": "confidence",
         "materials": "MATERIALS",
+        "fits": "\u2713 FITS (SOLVER)",
+        "nofit": "\u2715 EXCEEDS FLOOR AREA (SOLVER)",
     },
     "ar": {
         "doc": "ميراكي إنسايت · تقرير الذكاء المكاني",
@@ -108,6 +110,8 @@ LABELS = {
         "th": ("المنطقة", "الفئة", "نسبة المساحة", "كثافة الحركة"),
         "confidence": "الثقة",
         "materials": "الخامات",
+        "fits": "\u2713 ملائم (المحلّل)",
+        "nofit": "\u2715 يتجاوز المساحة (المحلّل)",
     },
 }
 
@@ -153,7 +157,12 @@ def build_html(
     scenario_cards = "".join(
         '<div class="card">'
         f'<p style="font-weight:600">{e(s.name)} '
-        f'<span class="mono muted" style="font-size:7.5pt">· {e(L["confidence"])} {round(s.confidence * 100)}%</span></p>'
+        f'<span class="mono muted" style="font-size:7.5pt">· {e(L["confidence"])} {round(s.confidence * 100)}%</span>'
+        f'<span class="mono" style="font-size:7pt;margin-left:6px;color:'
+        + ("var(--viridian)" if s.solver_feasible else "var(--thermal-text)")
+        + '">'
+        + (e(L["fits"]) if s.solver_feasible else e(L["nofit"]))
+        + "</span></p>"
         + "".join(
             f'<p style="font-size:9pt;margin:4px 0"><b>{e(m.description)}</b> '
             f'<span class="muted">— {e(m.rationale)}</span></p>'
