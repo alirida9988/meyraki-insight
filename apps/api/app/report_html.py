@@ -176,9 +176,13 @@ def build_html(
 
     renders_html = ""
     if moodboard_pngs:
+        from .imagegen import media_type
+
         cells = "".join(
             '<img style="width:32%;aspect-ratio:1;object-fit:cover;border:1px solid '
-            'var(--hairline);border-radius:2px" src="data:image/png;base64,'
+            'var(--hairline);border-radius:2px" src="data:'
+            + media_type(png)  # png or jpeg, from magic bytes — never assumed
+            + ";base64,"
             + base64.b64encode(png).decode()
             + '" alt="Interior render">'
             for png in moodboard_pngs[:3]

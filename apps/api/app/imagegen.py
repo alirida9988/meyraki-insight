@@ -1,27 +1,63 @@
-"""Moodboard interior renders — Gemini 2.5 Flash Image (docs/04-REUSE-MAP §2).
+"""Moodboard interior renders — provider chain (docs/04-REUSE-MAP §2).
 
-Called via REST with httpx (already a dependency) — no SDK needed for one endpoint.
+Order: Gemini 2.5 Flash Image (paid, best quality, auto-preferred the moment the
+key has quota) → Pollinations/FLUX (keyless, free) so the product is never
+blocked on a billing state. First success wins; every provider failure is
+collected and surfaced by the caller, never swallowed.
+
+# ponytail: free fallback has no SLA/commercial guarantees — it is the pilot
+# stopgap, not the production path. Gemini is the contracted provider.
 """
 
 import base64
+import urllib.parse
+from typing import Callable, NamedTuple
 
 import httpx
 
 from . import settings
 
 GEMINI_MODEL = "gemini-2.5-flash-image"
-_URL = (
+_GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
+_FREE_URL = "https://image.pollinations.ai/prompt/"
+
+MIN_IMAGE_BYTES = 5_000  # below this it is an error page or a placeholder, not a render
+_MAGIC = ((b"\x89PNG\r\n\x1a\n", ".png", "image/png"), (b"\xff\xd8\xff", ".jpg", "image/jpeg"))
+
+
+class Render(NamedTuple):
+    data: bytes
+    suffix: str
+    provider: str
+
+
+def media_type(data: bytes) -> str:
+    """Mime from magic bytes — never trust an extension for embedding."""
+    for magic, _suffix, mime in _MAGIC:
+        if data.startswith(magic):
+            return mime
+    return "application/octet-stream"
+
+
+def _classify(data: bytes, provider: str) -> Render:
+    for magic, suffix, _mime in _MAGIC:
+        if data.startswith(magic):
+            if len(data) < MIN_IMAGE_BYTES:
+                raise RuntimeError(f"{provider} returned a {len(data)}-byte image (too small)")
+            return Render(data, suffix, provider)
+    raise RuntimeError(f"{provider} returned a non-image payload")
 
 
 def enabled() -> bool:
-    return bool(settings.GEMINI_API_KEY)
+    """A render provider is always available (the free one needs no key)."""
+    return True
 
 
 def extract_image(data: dict) -> bytes:
-    """First inline image from a generateContent response; loud failure otherwise."""
+    """First inline image from a Gemini generateContent response; loud otherwise."""
     candidates = data.get("candidates") or [{}]
     parts = candidates[0].get("content", {}).get("parts", [])
     for part in parts:
@@ -37,15 +73,39 @@ def extract_image(data: dict) -> bytes:
     raise RuntimeError(f"Gemini returned no image (finishReason: {reason})")
 
 
-def generate_render(prompt: str) -> bytes:
+def _gemini(prompt: str) -> Render:
+    if not settings.GEMINI_API_KEY:
+        raise RuntimeError("Gemini key not configured")
     response = httpx.post(
-        _URL,
-        headers={
-            "x-goog-api-key": settings.GEMINI_API_KEY,
-            "content-type": "application/json",
-        },
+        _GEMINI_URL,
+        headers={"x-goog-api-key": settings.GEMINI_API_KEY, "content-type": "application/json"},
         json={"contents": [{"parts": [{"text": prompt}]}]},
         timeout=120,
     )
     response.raise_for_status()
-    return extract_image(response.json())
+    return _classify(extract_image(response.json()), "gemini")
+
+
+def _free(prompt: str) -> Render:
+    url = _FREE_URL + urllib.parse.quote(prompt[:900])
+    response = httpx.get(
+        url,
+        params={"width": 1024, "height": 1024, "nologo": "true", "model": "flux"},
+        timeout=120,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return _classify(response.content, "pollinations")
+
+
+PROVIDERS: list[Callable[[str], Render]] = [_gemini, _free]
+
+
+def generate_render(prompt: str) -> Render:
+    errors: list[str] = []
+    for provider in PROVIDERS:
+        try:
+            return provider(prompt)
+        except Exception as exc:  # noqa: BLE001 — collected; all-failed raises below
+            errors.append(f"{provider.__name__.strip('_')}: {str(exc)[:120]}")
+    raise RuntimeError("; ".join(errors) or "no image provider available")

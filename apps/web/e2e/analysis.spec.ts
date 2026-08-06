@@ -110,11 +110,20 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
 
   // Interior renders are an enhancement: either present, or their absence is
   // explicitly surfaced in the pipeline register — never silent.
-  const renderCount = await page.getByTestId("moodboard-render").count();
+  const renders = page.getByTestId("moodboard-render");
+  const renderCount = await renders.count();
   if (renderCount === 0) {
     await expect(page.getByText(/renders generated .* — continuing/)).toBeVisible();
   } else {
-    expect(renderCount).toBeGreaterThanOrEqual(1);
+    // Every rendered tile must be a real decoded image, not a broken placeholder.
+    for (let i = 0; i < renderCount; i++) {
+      const ok = await renders.nth(i).evaluate(
+        (img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0
+      );
+      expect(ok).toBe(true);
+    }
+    // The register names which provider served them (gemini or the free fallback).
+    await expect(page.getByText(/renders generated via \w+/)).toBeVisible();
   }
 
   // All 9 steps done

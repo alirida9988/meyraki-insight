@@ -44,7 +44,8 @@
 
 | Item | License/price | Score | Use |
 |---|---|---|---|
-| **Gemini 2.5 Flash Image** ("nano-banana") | ~$0.039/img API | 5 | **Primary moodboard/render generator** — best quality-per-dollar for interiors + image *editing* (restyle an existing room photo). SynthID-watermarked. |
+| **Gemini 2.5 Flash Image** ("nano-banana") | ~$0.039/img API | 5 | **Primary moodboard/render generator** — best quality-per-dollar for interiors + image *editing* (restyle an existing room photo). SynthID-watermarked. Requires billing enabled on the Google project (Free Tier has zero image quota). |
+| **Pollinations / FLUX** (`image.pollinations.ai`) | free, keyless | 3 | **Fallback only** — implemented as the second link in `app/imagegen.py`'s provider chain so renders never block on a billing state. No SLA or commercial guarantees: pilot stopgap, not the production path. Gemini is auto-preferred whenever it has quota. |
 | **Flux (Black Forest Labs) API** — Kontext | ~$0.03–0.055/img | 4 | Photoreal restyle alternative. ⚠ FLUX dev open weights are non-commercial — API only. |
 | gpt-image-1.5 (OpenAI) | ~$0.034/img medium | 4 | Fallback provider. (gpt-image-1 retires Oct 2026 — don't build on it.) |
 | [sd-interior-design](https://github.com/alaradirik/sd-interior-design) | MIT | 4 | Reference recipe if we ever self-host: RealisticVision inpaint + MLSD + segmentation ControlNet preserves room geometry while restyling. Runnable on Replicate today. |

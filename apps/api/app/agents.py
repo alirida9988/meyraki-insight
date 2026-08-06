@@ -447,24 +447,25 @@ def render_prompts(style: str, materials: list[str], space_type: str, graph: Zon
 
 def generate_moodboard_images(
     style: str, materials: list[str], space_type: str, graph: ZoneGraph
-) -> tuple[list[str], list[str]]:
-    """3 interior renders via Gemini → (storage keys, errors).
+) -> tuple[list[str], list[str], list[str]]:
+    """3 interior renders → (storage keys, errors, providers used).
 
     Renders are an enhancement: the caller decides how to surface failures —
     never by failing the analysis, never silently (pipeline emits a register note).
     """
     from . import imagegen, storage
 
-    if not imagegen.enabled():
-        return [], []
     keys: list[str] = []
     errors: list[str] = []
+    providers: list[str] = []
     for prompt in render_prompts(style, materials, space_type, graph):
         try:
-            keys.append(storage.save(imagegen.generate_render(prompt), ".png"))
+            render = imagegen.generate_render(prompt)
+            keys.append(storage.save(render.data, render.suffix))
+            providers.append(render.provider)
         except Exception as exc:  # noqa: BLE001 — collected for the caller
             errors.append(str(exc)[:200])
-    return keys, errors
+    return keys, errors, providers
 
 
 # ---------------------------------------------------------------- Report Writer

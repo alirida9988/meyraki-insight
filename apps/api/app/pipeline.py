@@ -196,17 +196,19 @@ def step_moodboard(ctx: Ctx) -> Moodboard:
         board = agents.run_moodboard(
             ctx.analysis.project.space_type, objectives, ctx.analysis.brief, graph
         )
-        keys, errors = agents.generate_moodboard_images(
+        keys, errors, providers = agents.generate_moodboard_images(
             board.style_name, board.materials, ctx.analysis.project.space_type, graph
         )
-        if errors:
-            # Visible, never fatal: renders are an enhancement over palette/materials.
-            note = "quota/billing" if "429" in errors[0] else errors[0][:80]
+        if errors or providers:
+            # Always visible, never fatal: renders are an enhancement over
+            # palette/materials, and which provider served them is operator info.
+            via = f" via {', '.join(sorted(set(providers)))}" if providers else ""
+            reason = f" ({errors[0][:80]})" if errors else ""
             _emit(
                 ctx.session,
                 ctx.analysis.id,
                 "step",
-                f"moodboard: {len(keys)}/3 renders generated ({note}) — continuing",
+                f"moodboard: {len(keys)}/3 renders generated{via}{reason} — continuing",
             )
         return board.model_copy(update={"image_keys": keys})
     return Moodboard(
