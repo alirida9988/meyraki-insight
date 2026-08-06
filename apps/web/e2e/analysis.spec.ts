@@ -7,8 +7,20 @@ import path from "path";
 const fixture = (name: string) => path.join(__dirname, "fixtures", name);
 const unique = `E2E ${Date.now()}`;
 
-test("invalid floorplan is rejected with a human message", async ({ page }) => {
+/** Register a fresh studio through the real login UI; lands on /projects. */
+async function signUp(page: import("@playwright/test").Page, tag: string) {
   await page.goto("/projects");
+  await page.waitForURL("**/login"); // unauthenticated -> redirected
+  await page.getByRole("button", { name: /create your studio/i }).click();
+  await page.getByPlaceholder(/studio \/ organization name/i).fill(`Studio ${tag}`);
+  await page.getByPlaceholder("Email").fill(`e2e-${tag.toLowerCase().replace(/\W+/g, "-")}-${Date.now()}@test.dev`);
+  await page.getByPlaceholder(/password/i).fill("e2e-password-1");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL("**/projects");
+}
+
+test("invalid floorplan is rejected with a human message", async ({ page }) => {
+  await signUp(page, "reject");
   await page.getByPlaceholder("Project name").fill(`${unique} reject`);
   await page.getByRole("button", { name: "Create project" }).click();
   await expect(page.getByText(`Analysis · ${unique} reject`)).toBeVisible();
@@ -22,7 +34,7 @@ test("invalid floorplan is rejected with a human message", async ({ page }) => {
 });
 
 test("valid image that is not a floorplan: Intake Agent rejects with its reason", async ({ page }) => {
-  await page.goto("/projects");
+  await signUp(page, "intake");
   await page.getByPlaceholder("Project name").fill(`${unique} intake-reject`);
   await page.getByRole("button", { name: "Create project" }).click();
   await expect(page.getByText(`Analysis · ${unique} intake-reject`)).toBeVisible();
@@ -47,7 +59,7 @@ test("valid image that is not a floorplan: Intake Agent rejects with its reason"
 });
 
 test("full analysis: upload → agents → heatmap, scenarios, moodboard, score", async ({ page }) => {
-  await page.goto("/projects");
+  await signUp(page, "full");
   await page.getByPlaceholder("Project name").fill(unique);
   await page.getByPlaceholder("Client (optional)").fill("Cleo Urban Stay");
   await page.locator("select").selectOption("hotel");
@@ -124,7 +136,7 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
 
 test("Arabic report: full analysis with report_language=ar", async ({ page }) => {
   test.skip(!process.env.E2E_AR, "Arabic full run is opt-in (E2E_AR=1) — extra model spend");
-  await page.goto("/projects");
+  await signUp(page, "ar");
   await page.getByPlaceholder("Project name").fill(`${unique} AR`);
   await page.getByPlaceholder("Client (optional)").fill("فندق كليو");
   await page.locator("select").selectOption("hotel");

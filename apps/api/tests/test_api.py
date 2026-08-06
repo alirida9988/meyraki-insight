@@ -24,6 +24,11 @@ def client():
     if os.path.exists("test_meyraki.db"):
         os.remove("test_meyraki.db")
     with TestClient(app) as c:
+        c.post("/auth/register", json={
+            "email": f"apiorg-{os.getpid()}@test.dev",
+            "password": "test-password-1",
+            "org_name": "ApiOrg",
+        })
         yield c
 
 

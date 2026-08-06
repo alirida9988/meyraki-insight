@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from typing import Literal
@@ -15,9 +15,10 @@ from sqlalchemy.orm import Session
 
 from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schemas
 
-from . import footfall, settings, storage
+from . import auth as auth_mod
+from . import footfall, ratelimit, settings, storage
 from .db import SessionLocal, get_session, init_db
-from .models import Analysis, Event, Project, StepRun, Upload
+from .models import Analysis, Event, Org, Project, StepRun, Upload, User
 from .pipeline import STEP_NAMES, run_analysis
 
 
@@ -31,9 +32,74 @@ app = FastAPI(title="Meyraki Insight API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def rate_limit(request, call_next):
+    try:
+        ratelimit.check(request)
+    except HTTPException as exc:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"detail": exc.detail}, status_code=429, headers=exc.headers)
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------- auth
+
+class RegisterIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=auth_mod.MIN_PASSWORD_LEN, max_length=200)
+    org_name: str = Field(min_length=1, max_length=200)
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/register", status_code=201)
+def register(body: RegisterIn, response: Response, session: Session = Depends(get_session)) -> dict:
+    email = body.email.strip().lower()
+    if session.scalar(select(User).where(User.email == email)) is not None:
+        raise HTTPException(409, "An account with this email already exists — sign in instead.")
+    org = Org(name=body.org_name.strip())
+    session.add(org)
+    session.flush()
+    user = User(org_id=org.id, email=email, password_hash=auth_mod.hash_password(body.password))
+    session.add(user)
+    session.commit()
+    auth_mod.set_cookie(response, auth_mod.create_session(session, user))
+    return {"email": user.email, "org": org.name}
+
+
+@app.post("/auth/login")
+def login(body: LoginIn, response: Response, session: Session = Depends(get_session)) -> dict:
+    user = session.scalar(select(User).where(User.email == body.email.strip().lower()))
+    if user is None or not auth_mod.verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "Email or password is incorrect.")
+    auth_mod.set_cookie(response, auth_mod.create_session(session, user))
+    org = session.get(Org, user.org_id)
+    return {"email": user.email, "org": org.name if org else ""}
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response, session: Session = Depends(get_session)) -> dict:
+    token = request.cookies.get(auth_mod.COOKIE)
+    if token:
+        auth_mod.destroy_session(session, token)
+    response.delete_cookie(auth_mod.COOKIE)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def me(user: User = Depends(auth_mod.current_user), session: Session = Depends(get_session)) -> dict:
+    org = session.get(Org, user.org_id)
+    return {"email": user.email, "org": org.name if org else ""}
 
 
 @app.get("/health")
@@ -55,17 +121,43 @@ class ProjectIn(BaseModel):
 
 
 @app.post("/projects", status_code=201)
-def create_project(body: ProjectIn, session: Session = Depends(get_session)) -> dict:
-    project = Project(name=body.name, client_name=body.client_name, space_type=body.space_type)
+def create_project(
+    body: ProjectIn,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> dict:
+    project = Project(org_id=user.org_id, name=body.name, client_name=body.client_name, space_type=body.space_type)
     session.add(project)
     session.commit()
     return _project_out(project)
 
 
 @app.get("/projects")
-def list_projects(session: Session = Depends(get_session)) -> list[dict]:
-    projects = session.scalars(select(Project).order_by(Project.created_at.desc())).all()
+def list_projects(
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> list[dict]:
+    projects = session.scalars(
+        select(Project).where(Project.org_id == user.org_id).order_by(Project.created_at.desc())
+    ).all()
     return [_project_out(p) for p in projects]
+
+
+def _own_project(session: Session, user: User, project_id: str) -> Project:
+    project = session.get(Project, project_id)
+    if project is None or project.org_id != user.org_id:
+        raise HTTPException(404, "Project not found")
+    return project
+
+
+def _own_analysis(session: Session, user: User, analysis_id: str) -> Analysis:
+    analysis = session.get(Analysis, analysis_id)
+    if analysis is None:
+        raise HTTPException(404, "Analysis not found")
+    project = session.get(Project, analysis.project_id)
+    if project is None or project.org_id != user.org_id:
+        raise HTTPException(404, "Analysis not found")
+    return analysis
 
 
 def _project_out(p: Project) -> dict:
@@ -86,9 +178,9 @@ async def upload_file(
     file: UploadFile,
     kind: str,
     session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
 ) -> dict:
-    if session.get(Project, project_id) is None:
-        raise HTTPException(404, "Project not found")
+    _own_project(session, user, project_id)
     if kind not in ("floorplan", "footfall"):
         raise HTTPException(422, 'kind must be "floorplan" or "footfall"')
 
@@ -159,9 +251,9 @@ def start_analysis(
     body: AnalysisIn,
     tasks: BackgroundTasks,
     session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
 ) -> dict:
-    if session.get(Project, project_id) is None:
-        raise HTTPException(404, "Project not found")
+    _own_project(session, user, project_id)
     plan = session.get(Upload, body.floorplan_upload_id)
     if plan is None or plan.project_id != project_id or plan.kind != "floorplan":
         raise HTTPException(
@@ -193,10 +285,12 @@ def start_analysis(
 
 
 @app.get("/analyses/{analysis_id}")
-def get_analysis(analysis_id: str, session: Session = Depends(get_session)) -> dict:
-    analysis = session.get(Analysis, analysis_id)
-    if analysis is None:
-        raise HTTPException(404, "Analysis not found")
+def get_analysis(
+    analysis_id: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> dict:
+    analysis = _own_analysis(session, user, analysis_id)
     return {
         "id": analysis.id,
         "project_id": analysis.project_id,
@@ -212,8 +306,12 @@ def get_analysis(analysis_id: str, session: Session = Depends(get_session)) -> d
 
 @app.post("/analyses/{analysis_id}/resume")
 def resume_analysis(
-    analysis_id: str, tasks: BackgroundTasks, session: Session = Depends(get_session)
+    analysis_id: str,
+    tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
 ) -> dict:
+    _own_analysis(session, user, analysis_id)
     # Atomic claim: exactly one concurrent caller wins (rowcount == 1); a 'running'
     # analysis is claimable only when its heartbeat is stale (crashed worker).
     from sqlalchemy import update
@@ -246,10 +344,12 @@ def resume_analysis(
 
 
 @app.get("/analyses/{analysis_id}/report.pdf")
-def download_report(analysis_id: str, session: Session = Depends(get_session)) -> Response:
-    analysis = session.get(Analysis, analysis_id)
-    if analysis is None:
-        raise HTTPException(404, "Analysis not found")
+def download_report(
+    analysis_id: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> Response:
+    analysis = _own_analysis(session, user, analysis_id)
     report_step = next((s for s in analysis.steps if s.name == "report"), None)
     key = (report_step.output or {}).get("report_key") if report_step else None
     if not key:
@@ -266,7 +366,7 @@ def download_report(analysis_id: str, session: Session = Depends(get_session)) -
 
 
 @app.get("/files/{key}")
-def get_file(key: str) -> Response:
+def get_file(key: str, user: User = Depends(auth_mod.current_user)) -> Response:
     """Serve stored artifacts (heatmaps, moodboards, reports) by storage key."""
     try:
         data = storage.load(key)
@@ -286,10 +386,10 @@ async def stream_events(
     analysis_id: str,
     session: Session = Depends(get_session),
     last_event_id: str | None = Header(None),
+    user: User = Depends(auth_mod.current_user),
 ) -> StreamingResponse:
     """SSE progress stream — polls the events table; fine for dev scale."""
-    if session.get(Analysis, analysis_id) is None:
-        raise HTTPException(404, "Analysis not found")
+    _own_analysis(session, user, analysis_id)
 
     async def gen():
         # Resume from Last-Event-ID so browser reconnects don't replay the log.

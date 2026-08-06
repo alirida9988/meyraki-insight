@@ -25,6 +25,11 @@ CSV = b"zone_name,timestamp,traffic_count\nLobby,2025-04-20 08:00,120\n"
 @pytest.fixture(scope="module")
 def client():
     with TestClient(app) as c:
+        c.post("/auth/register", json={
+            "email": f"hardorg-{os.getpid()}@test.dev",
+            "password": "test-password-1",
+            "org_name": "HardOrg",
+        })
         yield c
 
 

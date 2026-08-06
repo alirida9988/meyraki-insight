@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const apiFetch = (path: string, init?: RequestInit) =>
+  fetch(`${API}${path}`, { credentials: "include", ...init });
 
 type Project = {
   id: string;
@@ -71,6 +74,7 @@ function DimLine({ label, right }: { label: string; right?: string }) {
 }
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [selected, setSelected] = useState<Project | null>(null);
@@ -107,13 +111,21 @@ export default function ProjectsPage() {
 
   function loadProjects() {
     setLoadState("loading");
-    fetch(`${API}/projects`)
-      .then((r) => r.json())
+    apiFetch("/projects")
+      .then((r) => {
+        if (r.status === 401) {
+          router.push("/login");
+          throw new Error("unauthenticated");
+        }
+        return r.json();
+      })
       .then((list) => {
         setProjects(list);
         setLoadState("ready");
       })
-      .catch(() => setLoadState("error"));
+      .catch((err) => {
+        if (err?.message !== "unauthenticated") setLoadState("error");
+      });
   }
 
   useEffect(() => {
@@ -148,7 +160,7 @@ export default function ProjectsPage() {
     e.preventDefault();
     setCreateError(null);
     try {
-      const r = await fetch(`${API}/projects`, {
+      const r = await apiFetch("/projects", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, client_name: client || null, space_type: spaceType }),
@@ -176,7 +188,7 @@ export default function ProjectsPage() {
     let r: Response;
     let body: { id?: string; detail?: unknown };
     try {
-      r = await fetch(`${API}/projects/${pid}/uploads?kind=${kind}`, { method: "POST", body: form });
+      r = await apiFetch(`/projects/${pid}/uploads?kind=${kind}`, { method: "POST", body: form });
       body = await r.json();
     } catch {
       if (selectedIdRef.current === pid) setUploadErrors(["Upload failed — couldn't reach the server."]);
@@ -209,7 +221,7 @@ export default function ProjectsPage() {
     setStatus("queued");
     let r: Response;
     try {
-      r = await fetch(`${API}/projects/${pid}/analyses`, {
+      r = await apiFetch(`/projects/${pid}/analyses`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -237,7 +249,7 @@ export default function ProjectsPage() {
 
     const syncFromServer = async () => {
       try {
-        const detail = await fetch(`${API}/analyses/${id}`).then((res) => res.json());
+        const detail = await apiFetch(`/analyses/${id}`).then((res) => res.json());
         if (selectedIdRef.current !== pid) return;
         setStatus(detail.status);
         setSteps(detail.steps.map((s: StepInfo) => ({ name: s.name, status: s.status })));
@@ -266,7 +278,7 @@ export default function ProjectsPage() {
     stopPolling();
     pollRef.current = setInterval(() => void syncFromServer(), 5000);
 
-    const es = new EventSource(`${API}/analyses/${id}/events`);
+    const es = new EventSource(`${API}/analyses/${id}/events`, { withCredentials: true });
     esRef.current = es;
     es.onmessage = (ev) => {
       const data = JSON.parse(ev.data) as { kind: string; message: string };
@@ -294,7 +306,18 @@ export default function ProjectsPage() {
         <Link href="/" className="font-serif text-[28px] tracking-tight">
           Méyraki <span className="ms-2 font-mono text-xs uppercase tracking-[0.18em] text-graphite">Insight</span>
         </Link>
-        <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Projects</span>
+        <div className="flex items-center gap-4">
+          <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Projects</span>
+          <button
+            onClick={async () => {
+              await apiFetch("/auth/logout", { method: "POST" });
+              router.push("/login");
+            }}
+            className="rounded-sheet border border-hairline px-3 py-1.5 text-sm text-graphite transition-colors hover:border-graphite"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       <div className="grid gap-10 md:grid-cols-[320px_1fr]">
