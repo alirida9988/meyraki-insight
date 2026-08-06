@@ -9,8 +9,26 @@ from app.agents import WireZoneGraph, repair_zone_graph
 from app.imagegen import Render, _classify, extract_image, generate_render, media_type
 from tests.test_agents import _wz
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 20_000
-JPG = b"\xff\xd8\xff\xe0" + b"0" * 20_000
+def _image(fmt: str, size: tuple[int, int] = (1200, 1200)) -> bytes:
+    """A real decodable image. Magic-byte-only stubs used to pass here, which is the
+    exact bug _classify now catches: a truncated file with a valid header renders as a
+    grey box in the client's PDF. Noise keeps it over MIN_IMAGE_BYTES after compression."""
+    import io
+    import random
+
+    from PIL import Image
+
+    rng = random.Random(7)
+    img = Image.new("RGB", size)
+    img.putdata([(rng.randrange(256), rng.randrange(256), rng.randrange(256))
+                 for _ in range(size[0] * size[1])])
+    buffer = io.BytesIO()
+    img.save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
+PNG = _image("PNG")
+JPG = _image("JPEG")
 B64 = base64.b64encode(PNG).decode()
 
 
@@ -95,6 +113,49 @@ def test_chain_all_providers_failing_raises_with_every_reason(monkeypatch):
     assert "gemini down" in str(exc.value) and "free down" in str(exc.value)
 
 
+def test_flux_provider_requires_a_token(monkeypatch):
+    from app import settings
+
+    monkeypatch.setattr(settings, "HUGGINGFACE_API_TOKEN", "")
+    with pytest.raises(RuntimeError, match="not configured"):
+        imagegen._flux("x")
+
+
+def test_flux_counts_as_final_quality_and_needs_no_cooldown():
+    """FLUX returns a true 1024px render with real material definition, so it is not
+    captioned as draft — and being a paid provider it does not rate-limit us."""
+    assert "flux" in imagegen.FINAL_QUALITY_PROVIDERS
+    assert "flux" not in imagegen.NEEDS_COOLDOWN
+    assert not Render(JPG, ".jpg", "flux", (1024, 1024)).is_draft
+    # ...but an under-resolution result from any provider is still draft
+    assert Render(JPG, ".jpg", "flux", (512, 512)).is_draft
+
+
+def test_flux_is_tried_before_the_free_tier(monkeypatch):
+    """Order matters: the free tier is the last resort, not the second choice."""
+    names = [p.__name__ for p in imagegen.PROVIDERS]
+    assert names.index("_flux") < names.index("_free")
+    assert names.index("_gemini") < names.index("_flux")
+
+
+def test_flux_reports_a_missing_image_url_instead_of_crashing(monkeypatch):
+    class _Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"images": []}
+
+    from app import settings
+
+    monkeypatch.setattr(settings, "HUGGINGFACE_API_TOKEN", "hf_test")
+    monkeypatch.setattr(imagegen.httpx, "post", lambda *a, **k: _Response())
+    with pytest.raises(RuntimeError, match="no image url"):
+        imagegen._flux("x")
+
+
 def test_gemini_provider_requires_key(monkeypatch):
     from app import settings
 
@@ -115,7 +176,11 @@ def test_moodboard_images_partial_success_kept(monkeypatch, tmp_path):
     from app import settings, storage
 
     monkeypatch.setattr(settings, "UPLOAD_DIR", tmp_path)
-    outcomes = iter([Render(PNG, ".png", "gemini"), RuntimeError("boom"), Render(JPG, ".jpg", "pollinations")])
+    outcomes = iter([
+        Render(PNG, ".png", "gemini", (1200, 1200)),
+        RuntimeError("boom"),
+        Render(JPG, ".jpg", "pollinations", (768, 768)),
+    ])
 
     def fake_render(prompt):
         item = next(outcomes)
@@ -124,16 +189,162 @@ def test_moodboard_images_partial_success_kept(monkeypatch, tmp_path):
         return item
 
     monkeypatch.setattr(imagegen, "generate_render", fake_render)
-    keys, errors, providers = agents.generate_moodboard_images("Style", ["oak"], "hotel", _graph())
+    keys, errors, renders = agents.generate_moodboard_images("Style", ["oak"], "hotel", _graph())
     assert len(keys) == 2 and len(errors) == 1
-    assert sorted(providers) == ["gemini", "pollinations"]
+    assert sorted(r.provider for r in renders) == ["gemini", "pollinations"]
     assert keys[0].endswith(".png") and keys[1].endswith(".jpg")
     assert storage.load(keys[0]) == PNG
 
 
 def test_moodboard_images_total_failure_returns_errors_not_raise(monkeypatch):
+    monkeypatch.setattr(imagegen, "FREE_COOLDOWN_S", 0)  # no real waiting in the suite
     monkeypatch.setattr(
         imagegen, "generate_render", lambda p: (_ for _ in ()).throw(RuntimeError("all down"))
     )
     keys, errors, providers = agents.generate_moodboard_images("Style", ["oak"], "hotel", _graph())
     assert keys == [] and providers == [] and len(errors) == 3
+
+
+def test_a_render_is_draft_unless_a_contracted_provider_delivered_full_resolution():
+    """The free tier caps at 768px whatever we request and no longer serves FLUX — its
+    output indicates mood, it is not a client visual. The report captions it, so the
+    flag has to be right."""
+    assert not Render(PNG, ".png", "gemini", (1024, 1024)).is_draft
+    assert Render(JPG, ".jpg", "pollinations", (1024, 1024)).is_draft   # not contracted
+    assert Render(PNG, ".png", "gemini", (768, 768)).is_draft           # under-resolution
+    assert Render(JPG, ".jpg", "pollinations", (768, 768)).is_draft
+
+
+def test_classify_reports_the_real_pixel_size_and_rejects_a_truncated_image():
+    """Magic bytes only prove the header. A header-valid truncated JPEG used to pass and
+    then render as a grey box inside the client's PDF."""
+    import pytest as _pytest
+
+    assert imagegen._classify(PNG, "gemini").pixels == (1200, 1200)
+    truncated = JPG[: len(JPG) // 3]
+    assert truncated.startswith(b"\xff\xd8\xff") and len(truncated) > imagegen.MIN_IMAGE_BYTES
+    with _pytest.raises(RuntimeError, match="undecodable"):
+        imagegen._classify(truncated, "pollinations")
+
+
+def test_render_batch_spaces_requests_so_the_free_provider_stops_refusing(monkeypatch):
+    """Measured: the free provider 429s on back-to-back requests, which is why only one
+    of three renders survived every run. Attempts after the first must be spaced."""
+    monkeypatch.setattr(imagegen, "FREE_COOLDOWN_S", 5)
+    waits: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda s: waits.append(s))
+    monkeypatch.setattr(
+        imagegen, "generate_render", lambda p: Render(JPG, ".jpg", "pollinations", (768, 768))
+    )
+    keys, errors, renders = agents.generate_moodboard_images("S", ["oak"], "hotel", _graph())
+    assert len(keys) == 3 and not errors
+    assert waits == [5, 5], "two gaps for three sequential free-provider renders"
+
+
+@pytest.mark.parametrize("provider", ["gemini", "flux"])
+def test_render_batch_does_not_space_a_paid_provider(monkeypatch, provider):
+    monkeypatch.setattr(imagegen, "FREE_COOLDOWN_S", 5)
+    waits: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda s: waits.append(s))
+    monkeypatch.setattr(
+        imagegen, "generate_render", lambda p: Render(PNG, ".png", provider, (1024, 1024))
+    )
+    keys, _errors, _renders = agents.generate_moodboard_images("S", ["oak"], "hotel", _graph())
+    assert len(keys) == 3 and waits == []
+
+
+def test_render_batch_stops_at_its_wall_clock_budget(monkeypatch):
+    """A slow or drip-feeding provider must not stretch the pipeline without bound.
+    The budget replaces the unrealistically short read timeout as that protection."""
+    monkeypatch.setattr(imagegen, "FREE_COOLDOWN_S", 0)
+    # monotonic returns 0 while starting and checking the first prompt, then jumps past
+    # the 240s budget — one render lands, the rest are skipped with a visible reason.
+    readings = [0.0, 0.0, 300.0]
+    monkeypatch.setattr(
+        "time.monotonic", lambda: readings.pop(0) if len(readings) > 1 else readings[0]
+    )
+    monkeypatch.setattr(
+        imagegen, "generate_render", lambda p: Render(JPG, ".jpg", "pollinations", (768, 768))
+    )
+    keys, errors, _renders = agents.generate_moodboard_images("S", ["oak"], "hotel", _graph())
+    assert len(keys) == 1, "the first render runs, then the budget stops the batch"
+    assert any("budget" in e and "skipped" in e for e in errors)
+
+
+def test_a_mid_batch_downgrade_to_the_free_tier_still_gets_spaced(monkeypatch):
+    """Renders 1 and 2 can succeed on a paid provider, needing no cooldown, and then
+    render 3 drops to the free tier. It used to arrive with no spacing and be refused —
+    which is exactly what happened when FLUX ran out of credits partway through."""
+    monkeypatch.setattr(imagegen, "FREE_COOLDOWN_S", 5)
+    waits: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda s: waits.append(s))
+    outcomes = iter([
+        Render(JPG, ".jpg", "flux", (1024, 1024)),
+        RuntimeError("gemini: 429; flux: 402 credits depleted; pollinations: 429"),
+        Render(JPG, ".jpg", "pollinations", (768, 768)),
+    ])
+
+    def fake_render(prompt):
+        item = next(outcomes)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(imagegen, "generate_render", fake_render)
+    _keys, errors, _renders = agents.generate_moodboard_images("S", ["oak"], "hotel", _graph())
+    # no wait before render 2 (only a paid render so far), one before render 3 (an error
+    # means the free tier may already have been hit)
+    assert waits == [5]
+    # every provider's reason survives, so "402 credits depleted" reaches the operator
+    assert "402 credits depleted" in errors[0] and "pollinations" in errors[0]
+
+
+def test_resolution_summary_reports_a_range_for_a_mixed_batch():
+    """A paid provider running out of credits partway leaves a mixed batch. Reporting
+    only its best resolution reads as though every render came back full size."""
+    def r(px):
+        return Render(b"", ".jpg", "x", (px, px))
+
+    assert imagegen.describe_resolution([r(768)]) == " at 768px"
+    assert imagegen.describe_resolution([r(1024)]) == " at 1024px"
+    assert imagegen.describe_resolution([r(1024), r(768)]) == " at 768–1024px"
+    assert imagegen.describe_resolution([]) == ""
+    assert imagegen.describe_resolution([Render(b"", ".jpg", "x", (0, 0))]) == ""
+
+
+def test_flux_distinguishes_a_delivery_failure_from_a_generation_failure(monkeypatch):
+    """The image is already paid for once the URL comes back, so a bad media host must
+    not read as a model problem — that sends whoever reads the note to the wrong place."""
+    class _Posted:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"images": [{"url": "https://media.example/never.jpg"}]}
+
+    from app import settings
+
+    monkeypatch.setattr(settings, "HUGGINGFACE_API_TOKEN", "hf_test")
+    monkeypatch.setattr(imagegen.httpx, "post", lambda *a, **k: _Posted())
+    monkeypatch.setattr(
+        imagegen.httpx, "get",
+        lambda *a, **k: (_ for _ in ()).throw(imagegen.httpx.ConnectError("host down")),
+    )
+    with pytest.raises(RuntimeError, match="delivery failed"):
+        imagegen._flux("x")
+
+
+def test_flux_reports_an_unreadable_body_instead_of_a_json_traceback(monkeypatch):
+    class _Posted:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1")
+
+    from app import settings
+
+    monkeypatch.setattr(settings, "HUGGINGFACE_API_TOKEN", "hf_test")
+    monkeypatch.setattr(imagegen.httpx, "post", lambda *a, **k: _Posted())
+    with pytest.raises(RuntimeError, match="unreadable response"):
+        imagegen._flux("x")

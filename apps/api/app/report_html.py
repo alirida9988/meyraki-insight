@@ -89,6 +89,8 @@ LABELS = {
         "th": ("Zone", "Category", "Area share", "Flow intensity"),
         "confidence": "confidence",
         "materials": "MATERIALS",
+        "draft_renders": "Draft: these images indicate mood and material direction. "
+        "They are not final visuals.",
         "fits": "\u2713 FITS (SOLVER)",
         "nofit": "\u2715 EXCEEDS FLOOR AREA (SOLVER)",
     },
@@ -112,6 +114,7 @@ LABELS = {
         "materials": "الخامات",
         "fits": "\u2713 ملائم (المحلّل)",
         "nofit": "\u2715 يتجاوز المساحة (المحلّل)",
+        "draft_renders": "مسوّدات: صور توضيحية للأجواء والخامات، وليست تصاميم نهائية.",
     },
 }
 
@@ -223,8 +226,17 @@ def build_html(
             + '" alt="Interior render">'
             for png in moodboard_pngs[:3]
         )
+        # An unlabelled soft render inside a branded PDF reads as Meyraki's finished
+        # work. When the free fallback served them, the client sees that plainly.
+        caption = ""
+        if getattr(moodboard, "renders_are_draft", False):
+            caption = (
+                '<p style="font-size:8.5pt;margin-top:2mm" class="muted">'
+                + e(L["draft_renders"])
+                + "</p>"
+            )
         renders_html = (
-            '<div style="display:flex;gap:2%;margin-top:5mm">' + cells + "</div>"
+            '<div style="display:flex;gap:2%;margin-top:5mm">' + cells + "</div>" + caption
         )
 
     assumptions = "".join(

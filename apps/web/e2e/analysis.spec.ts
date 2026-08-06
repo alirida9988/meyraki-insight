@@ -89,7 +89,7 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
   // Real pipeline (Haiku + Sonnet + Opus) — allow up to 4 minutes
   await expect(page.getByText("Analysis · " + unique)).toBeVisible();
   await expect(page.locator("span.dim-label", { hasText: "done" }).first()).toBeVisible({
-    timeout: 240_000,
+    timeout: 420_000,
   });
 
   // Every user-visible deliverable is present
@@ -173,7 +173,7 @@ test("PDF floorplan: full analysis with a rendered heatmap", async ({ page }) =>
 
   await page.getByRole("button", { name: "Generate insights" }).click();
   await expect(page.locator("span.dim-label", { hasText: "done" }).first()).toBeVisible({
-    timeout: 240_000,
+    timeout: 420_000,
   });
 
   // The heatmap is the point: PDFs used to produce none (pypdfium2 now rasterizes)
@@ -208,7 +208,7 @@ test("Arabic report: full analysis with report_language=ar", async ({ page }) =>
 
   await page.getByRole("button", { name: "Generate insights" }).click();
   await expect(page.locator("span.dim-label", { hasText: "done" }).first()).toBeVisible({
-    timeout: 240_000,
+    timeout: 420_000,
   });
 
   const download = page.getByTestId("report-download");

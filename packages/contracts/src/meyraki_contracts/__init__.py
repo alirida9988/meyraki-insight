@@ -216,6 +216,12 @@ class Moodboard(BaseModel):
     furniture_notes: list[str] = []
     lighting_concept: str | None = None
     image_keys: list[str] = []
+    render_provider: str | None = None
+    """Which image model produced the renders — travels to the report, not just the log."""
+    renders_are_draft: bool = False
+    """True when the renders came from the free fallback provider. The client report
+    must caption them as draft: they indicate mood and material direction, but they are
+    visibly softer than the contracted provider's output and are not final visuals."""
 
 
 # ---------------------------------------------------------------- step 5: business

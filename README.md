@@ -55,6 +55,7 @@ non-local environment:
 | Variable | Value | Why |
 |---|---|---|
 | `MEYRAKI_HTTPS` | `1` | Adds `Secure` to the session cookie. A TLS-terminating proxy does **not** add it for you. |
+| `HUGGINGFACE_API_TOKEN` | `hf_…` | Routes moodboard renders to FLUX.1-schnell — **final** quality. Without it renders fall to the free tier, which is captioned as draft in the client report. A free HF account's included credit runs out after a handful of images; top up pre-paid credits or subscribe to PRO. |
 | `MEYRAKI_WEB_ORIGINS` | `https://app.example.com` | CORS allow-list **and** the server-side CSRF origin check (comma-separated). |
 | `MEYRAKI_TRUST_PROXY` | `1` | Only when a trusted proxy is the sole ingress. Rate limits then key on the last `X-Forwarded-For` hop instead of the proxy IP (otherwise every customer shares one bucket). |
 | uvicorn flags | `--proxy-headers --forwarded-allow-ips=<lb-cidr>` | Same reason, at the server level. |

@@ -2,7 +2,11 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 300_000, // the full-analysis test runs the real AI pipeline
+  // The full-analysis test runs the real AI pipeline. The moodboard step is
+  // deliberately paced: the free render provider refuses back-to-back requests, so the
+  // three renders are spaced ~12s apart to deliver 3/3 instead of 1/3. Must stay above
+  // the in-test waits or this cap fires first and they never apply.
+  timeout: 600_000,
   expect: { timeout: 15_000 },
   retries: 0,
   workers: 1, // scenarios share the dev database — run serially

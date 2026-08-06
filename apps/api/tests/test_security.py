@@ -31,7 +31,7 @@ def _png() -> bytes:
 
 
 PNG = _png()
-BIG_PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 20_000  # passes MIN_IMAGE_BYTES
+from tests.test_imagegen import PNG as BIG_PNG  # a real decodable PNG over MIN_IMAGE_BYTES
 
 
 def _client(prefix: str, org: str) -> TestClient:
