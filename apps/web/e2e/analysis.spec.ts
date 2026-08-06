@@ -96,6 +96,15 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
   await expect(moodboard).toBeVisible();
   expect(await moodboard.locator("p", { hasText: /^#/ }).count()).toBeGreaterThanOrEqual(3);
 
+  // Interior renders are an enhancement: either present, or their absence is
+  // explicitly surfaced in the pipeline register — never silent.
+  const renderCount = await page.getByTestId("moodboard-render").count();
+  if (renderCount === 0) {
+    await expect(page.getByText(/renders generated .* — continuing/)).toBeVisible();
+  } else {
+    expect(renderCount).toBeGreaterThanOrEqual(1);
+  }
+
   // All 9 steps done
   await expect(page.getByText("qa · done")).toBeVisible();
 

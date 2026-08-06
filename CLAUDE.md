@@ -29,6 +29,9 @@ branded PDF report out. MENA/GCC launch focus, Arabic/RTL is a differentiator.
   (modern minimalist, gallery-white + ink + viridian #1C4A3E accent, thermal #DA4B22
   for data only, Instrument Serif/Sans + IBM Plex Mono, hairline rules, 2px radius,
   no shadows/gradients). The old dark/violet mockups are flow reference ONLY.
+- **Deliverables convention (founder directive 2026-08-06):** every generated document,
+  report PDF, heatmap, render, or verification screenshot the founder should see goes
+  into `artifacts/` at the repo root (gitignored, on disk for browsing).
 - Original source documents live in `~/Downloads` (Meyraki_* / MeyrakiInsight_* files,
   `meyraki-notes.txt`); extracted copies in scratchpad. They are historical — when they
   conflict with `docs/`, `docs/` wins.

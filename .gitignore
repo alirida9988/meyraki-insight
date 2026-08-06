@@ -13,3 +13,4 @@ playwright-report/
 apps/web/e2e/results-*.png
 apps/api/test_meyraki.db
 apps/api/var/
+artifacts/

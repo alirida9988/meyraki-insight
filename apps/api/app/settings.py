@@ -30,6 +30,7 @@ DATABASE_URL = os.environ.get(
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "var/uploads"))
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 
 def agents_enabled() -> bool:

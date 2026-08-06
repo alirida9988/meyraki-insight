@@ -79,6 +79,7 @@ def build_html(
     moodboard: Moodboard,
     business: dict,
     heatmap_png: bytes | None,
+    moodboard_pngs: list[bytes] | None = None,
 ) -> str:
     e = escape
     intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
@@ -115,6 +116,19 @@ def build_html(
     if heatmap_png:
         uri = "data:image/png;base64," + base64.b64encode(heatmap_png).decode()
         heatmap_html = f'<img class="heatmap" src="{uri}" alt="Guest-flow heatmap">'
+
+    renders_html = ""
+    if moodboard_pngs:
+        cells = "".join(
+            '<img style="width:32%;aspect-ratio:1;object-fit:cover;border:1px solid '
+            'var(--hairline);border-radius:2px" src="data:image/png;base64,'
+            + base64.b64encode(png).decode()
+            + '" alt="Interior render">'
+            for png in moodboard_pngs[:3]
+        )
+        renders_html = (
+            '<div style="display:flex;gap:2%;margin-top:5mm">' + cells + "</div>"
+        )
 
     assumptions = "".join(
         f'<p style="font-size:8.5pt" class="muted">· {e(a.get("statement", ""))}</p>'
@@ -177,6 +191,7 @@ def build_html(
 <section class="page">
   {_dim("04 · Design direction", moodboard.style_name)}
   <p style="max-width:150mm">{e(narrative.get("design_direction", ""))}</p>
+  {renders_html}
   <div style="margin-top:5mm">{swatches}</div>
   <p style="margin-top:5mm;font-size:9.5pt"><span class="mono muted" style="font-size:7.5pt;
   letter-spacing:.12em">MATERIALS · </span>{e(", ".join(moodboard.materials))}</p>

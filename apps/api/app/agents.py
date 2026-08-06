@@ -292,6 +292,8 @@ Produce 2-3 DISTINCT scenarios. Rules:
 - Scenarios should differ in strategy (e.g. circulation-first vs revenue-first), not
   be variations of one idea."""
     def attempt(text: str) -> LayoutProposals | None:
+        # NOTE: _parse sits outside the try so AgentRefusal/truncation propagate —
+        # only repair_layout's "zero valid scenarios" is retryable.
         wire: WireLayout = _parse(LAYOUT_MODEL, 16000, [{"type": "text", "text": text}], WireLayout)
         try:
             return repair_layout(wire, graph, objectives)
@@ -417,8 +419,45 @@ Rules:
         materials=[m.strip() for m in wire.materials if m.strip()][:6],
         furniture_notes=[f.strip() for f in wire.furniture_notes if f.strip()][:5],
         lighting_concept=wire.lighting_concept.strip() or None,
-        image_keys=[],  # image generation lands with the Gemini key (docs/04 §2)
+        image_keys=[],  # renders are orchestrated by the pipeline step (graceful degrade)
     )
+
+
+def render_prompts(style: str, materials: list[str], space_type: str, graph: ZoneGraph) -> list[str]:
+    guest_zones = [z.label for z in graph.zones if z.category.value in
+                   ("lobby", "lounge", "dining", "bar", "reception", "terrace", "workspace")][:4]
+    base = (
+        f"Photorealistic interior design render of a {space_type}, {style} style. "
+        f"Materials: {', '.join(materials)}. Natural light, editorial photography, "
+        "no people, no text, no watermarks."
+    )
+    return [
+        f"{base} Wide hero shot of the main guest area ({', '.join(guest_zones) or 'lobby'}).",
+        f"{base} Intimate detail vignette: seating corner with lighting and material textures.",
+        f"{base} Arrival view from the entrance looking into the space.",
+    ]
+
+
+def generate_moodboard_images(
+    style: str, materials: list[str], space_type: str, graph: ZoneGraph
+) -> tuple[list[str], list[str]]:
+    """3 interior renders via Gemini → (storage keys, errors).
+
+    Renders are an enhancement: the caller decides how to surface failures —
+    never by failing the analysis, never silently (pipeline emits a register note).
+    """
+    from . import imagegen, storage
+
+    if not imagegen.enabled():
+        return [], []
+    keys: list[str] = []
+    errors: list[str] = []
+    for prompt in render_prompts(style, materials, space_type, graph):
+        try:
+            keys.append(storage.save(imagegen.generate_render(prompt), ".png"))
+        except Exception as exc:  # noqa: BLE001 — collected for the caller
+            errors.append(str(exc)[:200])
+    return keys, errors
 
 
 # ---------------------------------------------------------------- Report Writer

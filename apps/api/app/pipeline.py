@@ -192,12 +192,23 @@ def step_moodboard(ctx: Ctx) -> Moodboard:
         from . import agents
 
         objectives = [Objective(o) for o in ctx.analysis.objectives] or [Objective.GUEST_FLOW]
-        return agents.run_moodboard(
-            ctx.analysis.project.space_type,
-            objectives,
-            ctx.analysis.brief,
-            ZoneGraph.model_validate(ctx.outputs["zones"]),
+        graph = ZoneGraph.model_validate(ctx.outputs["zones"])
+        board = agents.run_moodboard(
+            ctx.analysis.project.space_type, objectives, ctx.analysis.brief, graph
         )
+        keys, errors = agents.generate_moodboard_images(
+            board.style_name, board.materials, ctx.analysis.project.space_type, graph
+        )
+        if errors:
+            # Visible, never fatal: renders are an enhancement over palette/materials.
+            note = "quota/billing" if "429" in errors[0] else errors[0][:80]
+            _emit(
+                ctx.session,
+                ctx.analysis.id,
+                "step",
+                f"moodboard: {len(keys)}/3 renders generated ({note}) — continuing",
+            )
+        return board.model_copy(update={"image_keys": keys})
     return Moodboard(
         style_name="Serene boutique",
         palette=["#FBFAF7", "#1C4A3E", "#B08D57"],
@@ -292,6 +303,7 @@ def step_report(ctx: Ctx) -> ReportArtifact:
     from . import report_html
 
     heatmap_png = storage.load(flow.heatmap_key) if flow.heatmap_key else None
+    moodboard_pngs = [storage.load(k) for k in moodboard.image_keys[:3]]
     html = report_html.build_html(
         project_name=project.name,
         client_name=project.client_name,
@@ -303,6 +315,7 @@ def step_report(ctx: Ctx) -> ReportArtifact:
         moodboard=moodboard,
         business=business,
         heatmap_png=heatmap_png,
+        moodboard_pngs=moodboard_pngs,
     )
     key = storage.save(pdf_mod.html_to_pdf(html), ".pdf")
     return ReportArtifact(

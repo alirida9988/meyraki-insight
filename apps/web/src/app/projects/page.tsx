@@ -28,6 +28,7 @@ type MoodboardOut = {
   materials: string[];
   furniture_notes: string[];
   lighting_concept: string | null;
+  image_keys: string[];
 };
 type Results = {
   scenarios: ScenarioOut[];
@@ -540,6 +541,20 @@ export default function ProjectsPage() {
               {results?.moodboard && (
                 <div data-testid="moodboard">
                   <DimLine label="Moodboard" right={results.moodboard.style_name} />
+                  {(results.moodboard.image_keys ?? []).length > 0 && (
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {results.moodboard.image_keys.map((key) => (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          key={key}
+                          data-testid="moodboard-render"
+                          src={`${API}/files/${key}`}
+                          alt={`${results.moodboard!.style_name} interior render`}
+                          className="aspect-square w-full rounded-sheet border border-hairline object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-3 flex gap-2">
                     {results.moodboard.palette.map((hex) => (
                       <div key={hex} className="flex-1">
