@@ -55,7 +55,9 @@ non-local environment:
 | Variable | Value | Why |
 |---|---|---|
 | `MEYRAKI_HTTPS` | `1` | Adds `Secure` to the session cookie. A TLS-terminating proxy does **not** add it for you. |
-| `HUGGINGFACE_API_TOKEN` | `hf_…` | Routes moodboard renders to FLUX.1-schnell — **final** quality. Without it renders fall to the free tier, which is captioned as draft in the client report. A free HF account's included credit runs out after a handful of images; top up pre-paid credits or subscribe to PRO. |
+| `HUGGINGFACE_API_TOKEN` | `hf_…` | Routes moodboard renders to FLUX.1-Krea-dev — **final**, client-presentable quality (~$0.025/render, so ~$0.075 per report). Without it renders fall to the free tier, which is captioned as draft in the client report. A free HF account's included credit runs out after a handful of images; top up pre-paid credits or subscribe to PRO. |
+| `MEYRAKI_FLUX_MODEL` | `fal-ai/flux/krea` | Which FLUX model serves renders. Drop to `fal-ai/flux/schnell` ($0.003/MP instead of $0.025) when volume matters more than fidelity. |
+| `MEYRAKI_ANALYSIS_BUDGET_USD` | `1.50` | Per-analysis model-spend ceiling. Checked before every step; the run stops rather than overspending, and the receipt is served on `GET /analyses/{id}`. |
 | `MEYRAKI_WEB_ORIGINS` | `https://app.example.com` | CORS allow-list **and** the server-side CSRF origin check (comma-separated). |
 | `MEYRAKI_TRUST_PROXY` | `1` | Only when a trusted proxy is the sole ingress. Rate limits then key on the last `X-Forwarded-For` hop instead of the proxy IP (otherwise every customer shares one bucket). |
 | uvicorn flags | `--proxy-headers --forwarded-allow-ips=<lb-cidr>` | Same reason, at the server level. |
@@ -63,3 +65,32 @@ non-local environment:
 
 Rate limits are per process and in memory (`app/ratelimit.py`); move them to
 Redis before running multiple workers behind a load balancer.
+
+## Deployment (Docker)
+
+```bash
+cp .env.example .env          # fill in POSTGRES_PASSWORD and ANTHROPIC_API_KEY at minimum
+docker compose up --build     # db + api + web, on 127.0.0.1 only
+```
+
+| Service | Image | Notes |
+|---|---|---|
+| `db` | `postgres:16-alpine` | Named volume; `pg_isready -U … -d meyraki` gates the API's start. |
+| `api` | `apps/api/Dockerfile` | Carries a real Chromium — the report PDF is rendered by Playwright so it uses the web design system verbatim. Non-root, health-checked, uploads on a named volume. |
+| `web` | `apps/web/Dockerfile` | Next.js `output: "standalone"`. Non-root, health-checked. |
+
+Two things that bite if you skip them:
+
+- **`NEXT_PUBLIC_API_URL` is baked in at build time**, because the browser reads it. The
+  web image is therefore environment-specific — a staging image cannot be promoted to
+  production unchanged. Build one per environment, and use the URL the *browser* can
+  reach, never the compose service name.
+- **Ports are published on `127.0.0.1` only.** Nothing in the compose file terminates TLS
+  or authenticates at the edge. Put a TLS proxy in front, and set both `MEYRAKI_HTTPS=1`
+  and `MEYRAKI_TRUST_PROXY=1` — without the first the session cookie ships without
+  `Secure`; without the second the rate limiter sees the proxy's IP as every client, so
+  one visitor can exhaust everyone's quota.
+
+There is no migration tool: `Base.metadata.create_all` creates missing tables on start
+but never alters an existing one. A new table lands on an existing database; a new
+*column* does not, and needs a hand-written migration until Alembic is added.

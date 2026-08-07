@@ -30,10 +30,15 @@ TOKEN_PRICES_USD: dict[str, tuple[float, float]] = {
     "claude-opus-5": (5.00, 25.00),
 }
 
-# USD per generated image.
+# USD per billable unit. fal prices per megapixel and reports what it charged in the
+# `x-fal-billable-units` header, so a 1024x1024 render is ~1 unit and a larger one costs
+# proportionally more — the receipt reconciles either way instead of assuming one image
+# is one charge. Rates verified on fal.ai 2026-08-07.
 IMAGE_PRICES_USD: dict[str, float] = {
     "gemini": 0.039,
-    "flux": 0.003,
+    "flux-krea": 0.025,     # FLUX.1-Krea-dev — photorealism-tuned, the default
+    "flux-dev": 0.025,      # FLUX.1-dev
+    "flux-schnell": 0.003,  # FLUX.1-schnell — the economy option
     "pollinations": 0.0,
 }
 
@@ -146,11 +151,14 @@ def record_usage_unavailable(step: str, model: str) -> None:
     _append(step, f"{model} ({USAGE_UNAVAILABLE})", 0, 0, 0.0)
 
 
-def record_image(step: str, provider: str) -> float:
-    """Book a generated image. Priced at the dearest known provider when unrecognised,
-    for the same reason unknown models are: a new provider must not cost nothing."""
+def record_image(step: str, provider: str, units: float = 1.0) -> float:
+    """Book a generated image. `units` is what the provider says it charged (fal returns
+    `x-fal-billable-units`, priced per megapixel). Priced at the dearest known provider
+    when unrecognised, for the same reason unknown models are: a new provider must not
+    cost nothing and slip past the ceiling."""
     fallback = max(IMAGE_PRICES_USD.values())
-    return _append(step, f"image:{provider}", 0, 0, IMAGE_PRICES_USD.get(provider, fallback))
+    per_unit = IMAGE_PRICES_USD.get(provider, fallback)
+    return _append(step, f"image:{provider}", 0, 0, per_unit * max(0.0, units))
 
 
 def spent_usd() -> float:
