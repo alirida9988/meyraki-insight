@@ -65,8 +65,34 @@ Value alternatives (behind the same interface): GPT-5.6 Terra ($2/$12) and Gemin
   - **Temporal**: the correct durability upgrade at Phase 3 scale (thousands of
     concurrent long jobs), officially integrated with Pydantic AI — our step design
     ports directly.
-- Cost guard: per-analysis budget enforced by the Routing Agent; Sonnet-5 intro pricing
-  ($2/$10) runs through 2026-08-31 — negligible either way at MVP volume.
+- Cost guard: **IMPLEMENTED** (`app/costs.py`, enforced in `pipeline.run_analysis`).
+  Every model call and every generated image is booked to a per-analysis ledger held in
+  a ContextVar — not a module global, because analyses run concurrently in FastAPI's
+  background threadpool and a shared ledger would bill one client's tokens to another's
+  budget. The ceiling is checked *before* each step, so work that cannot be paid for is
+  never started; remaining steps are marked `skipped`, and the spend that did happen is
+  persisted to `cost_entries` so a stopped run still has its receipt.
+  Measured on a real Cleo-class analysis (2026-08-07): **$0.1487 end to end** —
+  intake $0.0027 (Haiku), zones $0.0288 (Sonnet), layout $0.0752 (Opus — half the bill),
+  moodboard $0.0121, report $0.0299. The $1.50 default ceiling is ~10x headroom.
+  `StepBudget.max_usd` is enforced too, and now carries measured per-step figures
+  instead of a flat $0.20 that was 5x below what one layout call costs — layout can
+  make two Opus calls at max_tokens=16000 inside a single step, so a between-steps
+  check alone let one step overshoot the whole analysis budget.
+  `StepBudget.max_usd` is enforced too, and now carries measured per-step figures
+  instead of a flat $0.20 that was 5x below what one layout call costs — layout can make
+  two Opus calls at max_tokens=16000 inside a single step, so a between-steps check alone
+  let one step overshoot the whole analysis budget.
+  Every outcome that costs money is booked, including the ones that then raise: a
+  refusal, a max_tokens truncation and an SDK schema failure all follow a billed call and
+  were previously recorded as $0.00 — which made the exact runaway the ceiling exists to
+  stop invisible to it.
+  Prices are the published list rates below; Sonnet-5 intro pricing ($2/$10) through
+  2026-08-31 is deliberately NOT used, because a ceiling must never under-estimate.
+  Every outcome that costs money is booked, including the ones that then raise: a
+  refusal, a `max_tokens` truncation and an SDK schema failure all follow a billed call
+  and were previously recorded as $0.00 — which made the exact runaway the ceiling
+  exists to stop invisible to it.
 
 **Self-hosted escape hatch (Phase 3 cost lever):** Qwen3-VL (Apache 2.0) or InternVL 3.5
 (MIT) on vLLM for high-volume zone/OCR extraction once volume passes ~10k analyses/month;

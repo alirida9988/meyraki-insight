@@ -29,7 +29,7 @@ from meyraki_contracts import (
     ZoneGraph,
 )
 
-from . import settings
+from . import costs, settings
 
 INTAKE_MODEL = "claude-haiku-4-5"
 ZONES_MODEL = "claude-sonnet-5"
@@ -68,7 +68,8 @@ def _plan_block(plan_bytes: bytes) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": media, "data": data}}
 
 
-def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseModel]):
+def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseModel],
+           step: str = "agent"):
     # The one chokepoint every agent routes through, so the kill switch lives here.
     # MEYRAKI_USE_AGENTS=off used to be honoured only by the pipeline, which meant a
     # test calling an agent directly would happily bill a real key from .env.
@@ -85,6 +86,10 @@ def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseM
             output_format=output_format,
         )
     except pydantic.ValidationError as exc:
+        # Billed and thrown away. A truncated response consumed the full output budget,
+        # so book the worst case rather than $0 — this is precisely the runaway the
+        # ceiling exists to stop, and recording nothing made it invisible to the guard.
+        costs.record_tokens(step, model, 0, max_tokens)
         # messages.parse() validates inside the SDK call, so a response truncated at
         # max_tokens surfaces here as "Invalid JSON: EOF while parsing" long before the
         # stop_reason check below can explain it. Arabic reports hit this first: the
@@ -96,6 +101,17 @@ def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseM
             else "output did not satisfy the contract"
         )
         raise RuntimeError(f"{model}: {detail} ({output_format.__name__})") from exc
+    # Book usage the moment the call returns: the three raises below all follow a call
+    # that was already billed, and recording after them booked those runaway cases at $0.
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        costs.record_usage_unavailable(step, model)
+    else:
+        costs.record_tokens(
+            step, model,
+            getattr(usage, "input_tokens", 0) or 0,
+            getattr(usage, "output_tokens", 0) or 0,
+        )
     if response.stop_reason == "refusal":
         raise AgentRefusal(f"{model} declined the request")
     if response.stop_reason == "max_tokens":
@@ -141,6 +157,7 @@ def run_intake(plan_bytes: bytes, footfall: FootfallStatus) -> IntakeManifest:
         2048,
         [_plan_block(plan_bytes), {"type": "text", "text": INTAKE_PROMPT}],
         IntakeVision,
+        step="intake",
     )
     return IntakeManifest(
         plan_quality=vision.plan_quality,
@@ -205,6 +222,7 @@ def run_zones(plan_bytes: bytes) -> ZoneGraph:
         16000,
         [_plan_block(plan_bytes), {"type": "text", "text": ZONES_PROMPT}],
         WireZoneGraph,
+        step="zones",
     )
     return repair_zone_graph(wire)
 
@@ -341,7 +359,7 @@ Produce 2-3 DISTINCT scenarios. Rules:
     def attempt(text: str) -> LayoutProposals | None:
         # NOTE: _parse sits outside the try so AgentRefusal/truncation propagate —
         # only repair_layout's "zero valid scenarios" is retryable.
-        wire: WireLayout = _parse(LAYOUT_MODEL, 16000, [{"type": "text", "text": text}], WireLayout)
+        wire: WireLayout = _parse(LAYOUT_MODEL, 16000, [{"type": "text", "text": text}], WireLayout, step="layout")
         try:
             return repair_layout(wire, graph, objectives)
         except RuntimeError:
@@ -359,6 +377,17 @@ Produce 2-3 DISTINCT scenarios. Rules:
         "after validation. Moves whose zone_ids are not EXACTLY the ids listed above are "
         "discarded. Produce 2-3 distinct scenarios, every move using exact zone ids."
     )
+    # The step ceiling is checked between steps, but this step can make two Opus calls
+    # at max_tokens=16000 — enough to overshoot the whole analysis budget inside one
+    # step. So the retry is gated too: if the first attempt already spent the step's
+    # allowance, keep what it produced rather than paying twice for the same step.
+    try:
+        costs.check_budget("layout", costs.current_budget_usd())
+    except costs.BudgetExceeded:
+        if first is not None:
+            return first
+        raise
+
     # A failing RETRY must never discard a valid first attempt (review F4);
     # with no first attempt, the retry's error is the real signal — propagate it.
     if first is not None:
@@ -465,7 +494,8 @@ Rules:
 - furniture_notes: concrete directions a buyer could act on.
 - lighting_concept: one sentence, layered lighting for the key zones."""
     wire: WireMoodboard = _parse(
-        MOODBOARD_MODEL, 4096, [{"type": "text", "text": prompt}], WireMoodboard
+        MOODBOARD_MODEL, 4096, [{"type": "text", "text": prompt}], WireMoodboard,
+        step="moodboard",
     )
     palette = clean_palette(wire.palette)
     return Moodboard(
@@ -625,4 +655,5 @@ Rules:
 - Ground every claim in the data above; no invented numbers.
 - Where flow is simulated, say so plainly once.
 - next_steps must be actions the client can schedule, ordered by leverage."""
-    return _parse(REPORT_MODEL, REPORT_MAX_TOKENS, [{"type": "text", "text": prompt}], WireReport)
+    return _parse(REPORT_MODEL, REPORT_MAX_TOKENS, [{"type": "text", "text": prompt}],
+                  WireReport, step="report")

@@ -174,7 +174,7 @@ def test_run_layout_retries_once_then_takes_best(monkeypatch):
     flow = simulated(graph)
     calls = []
 
-    def fake_parse(model, max_tokens, content, output_format):
+    def fake_parse(model, max_tokens, content, output_format, step="agent"):
         calls.append(content[0]["text"])
         if len(calls) == 1:
             return WireLayout(scenarios=[_ws("only_one", ["lobby"])])
@@ -197,7 +197,7 @@ def test_run_layout_keeps_first_when_retry_is_worse(monkeypatch):
     outputs = [WireLayout(scenarios=[_ws("only_one", ["lobby"])]),
                WireLayout(scenarios=[_ws("ghost_only", ["ghost"])])]
 
-    def fake_parse(model, max_tokens, content, output_format):
+    def fake_parse(model, max_tokens, content, output_format, step="agent"):
         return outputs.pop(0)
 
     monkeypatch.setattr(agents, "_parse", fake_parse)
@@ -216,7 +216,7 @@ def test_run_layout_retry_failure_falls_back_to_first(monkeypatch):
     flow = simulated(graph)
     calls = {"n": 0}
 
-    def fake_parse(model, max_tokens, content, output_format):
+    def fake_parse(model, max_tokens, content, output_format, step="agent"):
         calls["n"] += 1
         if calls["n"] == 1:
             return WireLayout(scenarios=[_ws("only_one", ["lobby"])])
@@ -236,7 +236,7 @@ def test_run_layout_refusal_with_no_first_attempt_propagates(monkeypatch):
     graph = _graph_two_zones()
     flow = simulated(graph)
 
-    def fake_parse(model, max_tokens, content, output_format):
+    def fake_parse(model, max_tokens, content, output_format, step="agent"):
         raise agents.AgentRefusal("declined")
 
     monkeypatch.setattr(agents, "_parse", fake_parse)

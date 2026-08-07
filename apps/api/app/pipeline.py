@@ -39,8 +39,8 @@ from meyraki_contracts import (
 )
 
 from . import flow as flow_mod
-from . import heatmap, settings, storage
-from .models import Analysis, Event, StepRun, Upload
+from . import costs, heatmap, settings, storage
+from .models import Analysis, CostEntry, Event, StepRun, Upload
 
 STEP_NAMES = [
     "intake",
@@ -114,13 +114,31 @@ def step_intake(ctx: Ctx) -> IntakeManifest:
     )
 
 
+# What each step actually bills, so the execution plan stops claiming "stub" for steps
+# that spend real money. Deterministic steps bill nothing.
+STEP_MODELS = {
+    "zones": "claude-sonnet-5",
+    "layout": "claude-opus-5",
+    "moodboard": "claude-sonnet-5",
+    "report": "claude-sonnet-5",
+}
+
+
 def step_routing(ctx: Ctx) -> ExecutionPlan:
     track = Track.DATA_DRIVEN if ctx.analysis.footfall_upload_id else Track.SIMULATED
     steps = [s for s in STEP_NAMES if s not in ("intake", "routing")]
     return ExecutionPlan(
         track=track,
         steps=steps,
-        budgets=[StepBudget(step=s, model="stub", max_usd=0.2) for s in steps],
+        total_budget_usd=costs.DEFAULT_BUDGET_USD,
+        budgets=[
+            StepBudget(
+                step=s,
+                model=STEP_MODELS.get(s, "deterministic"),
+                max_usd=costs.STEP_MAX_USD.get(s, costs.DEFAULT_STEP_MAX_USD),
+            )
+            for s in steps
+        ],
     )
 
 
@@ -459,6 +477,38 @@ def claimable_where(analysis_id: str, statuses: tuple[str, ...], now: datetime):
     )
 
 
+def _budget_for(ctx: Ctx) -> float:
+    """The analysis ceiling: the routing plan's figure once it exists, else the default
+    (intake and routing run before any plan is written)."""
+    plan = ctx.outputs.get("routing")
+    if isinstance(plan, dict) and isinstance(plan.get("total_budget_usd"), (int, float)):
+        # min, not the plan's word: a stored plan from before the ceiling was configured
+        # (or one asking for more) must never raise the operator's limit.
+        return min(float(plan["total_budget_usd"]), costs.DEFAULT_BUDGET_USD)
+    return costs.DEFAULT_BUDGET_USD
+
+
+def _prior_spend_usd(session: Session, analysis_id: str) -> float:
+    """What earlier runs of this analysis already spent, so a resume continues against
+    the same ceiling instead of being handed a fresh one."""
+    rows = session.query(CostEntry.usd).filter(CostEntry.analysis_id == analysis_id).all()
+    return round(sum(r[0] or 0.0 for r in rows), 6)
+
+
+def _persist_costs(session: Session, analysis_id: str) -> None:
+    """Flush new ledger rows to the DB so a crashed run still has its receipt.
+
+    Driven by what the ledger has not yet flushed, never by the DB row count: comparing
+    against existing rows dropped every entry of a resumed run, because the prior run's
+    rows made the offset larger than the new in-memory ledger.
+    """
+    pending = costs.unflushed()
+    for entry in pending:
+        session.add(CostEntry(analysis_id=analysis_id, **entry))
+    session.commit()
+    costs.mark_flushed(len(pending))
+
+
 def run_analysis(session: Session, analysis_id: str) -> None:
     """Execute pending steps in order; completed steps are skipped (resume-safe).
 
@@ -482,11 +532,16 @@ def run_analysis(session: Session, analysis_id: str) -> None:
     _emit(session, analysis.id, "pipeline", "Analysis started")
 
     ctx = Ctx(analysis, session)
+    ledger = costs.start_ledger(_prior_spend_usd(session, analysis.id))
     try:
         for step in analysis.steps:
             if step.status == "done" and step.output is not None:
                 ctx.outputs[step.name] = step.output
             else:
+                # Before, not after: the point is to not start work that cannot be paid
+                # for. Checking afterwards produces a receipt, not a guard.
+                costs.set_budget(_budget_for(ctx))
+                costs.check_budget(step.name, costs.current_budget_usd())
                 step.status = "running"
                 step.started_at = _now()
                 analysis.heartbeat_at = _now()
@@ -499,6 +554,7 @@ def run_analysis(session: Session, analysis_id: str) -> None:
                 step.finished_at = _now()
                 session.commit()
                 ctx.outputs[step.name] = step.output
+                _persist_costs(session, analysis.id)
                 _emit(session, analysis.id, "step", f"{step.name}: done")
 
             # Path-independent: fires whether intake just ran or was loaded from a
@@ -513,12 +569,26 @@ def run_analysis(session: Session, analysis_id: str) -> None:
                 _emit(session, analysis.id, "pipeline", "Rejected at intake")
                 return
 
+        _emit(session, analysis.id, "pipeline", f"Model spend: {costs.summary()}")
         qa = QAVerdict.model_validate(ctx.outputs["qa"])
         analysis.status = "done" if qa.passed else "failed"
         if not qa.passed:
             analysis.error = "; ".join(i.description for i in qa.issues)
         session.commit()
         _emit(session, analysis.id, "pipeline", f"Analysis {analysis.status}")
+    except costs.BudgetExceeded as exc:
+        # Not a crash: the guard did its job. The steps that already ran keep their
+        # output, the rest are marked skipped rather than failed, and the receipt says
+        # exactly where the money went.
+        for step in analysis.steps:
+            if step.status in ("pending", "running"):
+                step.status = "skipped"
+                step.error = str(exc)
+        analysis.status = "failed"
+        analysis.error = str(exc)
+        _persist_costs(session, analysis.id)
+        session.commit()
+        _emit(session, analysis.id, "pipeline", f"Budget ceiling hit — {costs.summary()}")
     except Exception as exc:  # noqa: BLE001 — step failures must land in the DB, not the void
         for step in analysis.steps:
             if step.status == "running":
@@ -526,5 +596,10 @@ def run_analysis(session: Session, analysis_id: str) -> None:
                 step.error = str(exc)
         analysis.status = "failed"
         analysis.error = str(exc)
+        _persist_costs(session, analysis.id)
         session.commit()
         _emit(session, analysis.id, "pipeline", f"Analysis failed: {exc}")
+    finally:
+        # Always release the ledger: a leaked ContextVar would bill the next analysis
+        # that reuses this worker thread for tokens it never spent.
+        costs.stop_ledger(ledger)

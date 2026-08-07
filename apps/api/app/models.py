@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -111,6 +111,28 @@ class StepRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     analysis: Mapped[Analysis] = relationship(back_populates="steps")
+
+
+class CostEntry(Base):
+    """What one analysis actually spent, per model call.
+
+    A separate table rather than a column on Analysis: there is no migration tool here
+    (`Base.metadata.create_all` creates new tables but never ALTERs an existing one), so
+    a new table lands on existing databases and a new column would not.
+    """
+
+    __tablename__ = "cost_entries"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id"), index=True)
+    step: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(80))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class Event(Base):

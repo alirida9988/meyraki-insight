@@ -29,7 +29,7 @@ from typing import Callable, NamedTuple
 
 import httpx
 
-from . import settings
+from . import costs, settings
 
 GEMINI_MODEL = "gemini-2.5-flash-image"
 _GEMINI_URL = (
@@ -157,6 +157,9 @@ def _gemini(prompt: str) -> Render:
         timeout=TIMEOUT,
     )
     response.raise_for_status()
+    # Booked here, not after _classify: the image is paid for once the call succeeds,
+    # so a payload we then reject still cost money.
+    costs.record_image("moodboard", "gemini")
     return _classify(extract_image(response.json()), "gemini")
 
 
@@ -180,6 +183,7 @@ def _flux(prompt: str) -> Render:
         raise RuntimeError(f"FLUX returned an unreadable response ({exc})") from exc
     if not images or not images[0].get("url"):
         raise RuntimeError("FLUX returned no image url")
+    costs.record_image("moodboard", "flux")
     # The generation is already paid for by this point, so say plainly when it is the
     # delivery that failed rather than the generation — otherwise a bad media host looks
     # like a model problem and sends whoever reads the note to the wrong place.
@@ -204,6 +208,7 @@ def _free(prompt: str) -> Render:
         follow_redirects=True,
     )
     response.raise_for_status()
+    costs.record_image("moodboard", "pollinations")  # free, but it belongs in the receipt
     return _classify(response.content, "pollinations")
 
 
