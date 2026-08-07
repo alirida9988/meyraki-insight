@@ -19,7 +19,7 @@ from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schem
 from . import auth as auth_mod
 from . import footfall, ratelimit, settings, storage
 from .db import SessionLocal, get_session, init_db
-from .models import Analysis, Event, Org, Project, StepRun, Upload, User
+from .models import Analysis, CostEntry, Event, Org, Project, StepRun, Upload, User
 from .pipeline import STEP_NAMES, run_analysis
 
 
@@ -343,12 +343,25 @@ def get_analysis(
     user: User = Depends(auth_mod.current_user),
 ) -> dict:
     analysis = _own_analysis(session, user, analysis_id)
+    # What this analysis actually spent on models, org-scoped like everything else.
+    # An unenforced budget was fiction until M5; an unreported one is only half a fix.
+    entries = (
+        session.query(CostEntry).filter(CostEntry.analysis_id == analysis.id).all()
+    )
     return {
         "id": analysis.id,
         "project_id": analysis.project_id,
         "status": analysis.status,
         "objectives": analysis.objectives,
         "error": analysis.error,
+        "cost": {
+            "usd": round(sum(e.usd for e in entries), 6),
+            "by_step": [
+                {"step": e.step, "model": e.model, "input_tokens": e.input_tokens,
+                 "output_tokens": e.output_tokens, "usd": round(e.usd, 6)}
+                for e in entries
+            ],
+        },
         "steps": [
             {"name": s.name, "status": s.status, "output": s.output, "error": s.error}
             for s in analysis.steps

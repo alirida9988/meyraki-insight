@@ -59,7 +59,7 @@ Implement the 7-step agent pipeline (`01-ARCHITECTURE.md` §2) in order:
 
 ## Milestone 5 — Hardening & pilot (week 8)
 - Load/failure drills: kill workers mid-run (must resume), poison inputs (must reject
-  politely), provider outage (must fail over), cost ceilings enforced.
+  politely), provider outage (must fail over), cost ceilings enforced ✅ `app/costs.py`.
 - Security pass: signed URLs, org isolation tests, upload sanitization, rate limits.
 - Run 3–5 real pilot projects (Cleo-class); collect founder feedback; tune prompts
   against the golden set.

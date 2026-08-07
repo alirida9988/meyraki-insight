@@ -220,6 +220,32 @@ def main() -> int:
                f"solver_feasible={flags} — the documented 'solver guarantees' step is not implemented"
                if not any(flags) else str(flags))
 
+    # 16. Cost receipt + resume. A resumed analysis used to be handed a fresh budget and
+    # to lose its receipt entirely, so both are checked against the live stack.
+    if jpg_id:
+        detail = c.get(f"/analyses/{a1}").json()
+        cost = detail.get("cost") or {}
+        record(isinstance(cost.get("usd"), (int, float)) and cost.get("by_step") is not None,
+               "analysis reports what it cost",
+               f"${cost.get('usd')} over {len(cost.get('by_step') or [])} calls")
+
+        before, rows_before = cost.get("usd") or 0.0, len(cost.get("by_step") or [])
+        r = c.post(f"/analyses/{a1}/resume")
+        if r.status_code in (200, 202):
+            for _ in range(POLL_TICKS):
+                after_detail = c.get(f"/analyses/{a1}").json()
+                if after_detail["status"] in ("done", "failed", "rejected"):
+                    break
+                time.sleep(2)
+            after_cost = after_detail.get("cost") or {}
+            after, rows_after = after_cost.get("usd") or 0.0, len(after_cost.get("by_step") or [])
+            record(after >= before and rows_after >= rows_before,
+                   "resume keeps the earlier receipt instead of losing it",
+                   f"${before:.4f}/{rows_before} rows -> ${after:.4f}/{rows_after} rows")
+        else:
+            record(r.status_code == 409,
+                   "resume declined on a finished analysis", str(r.status_code))
+
     print("\n" + "=" * 70)
     bugs = [r for r in results if r[0] == "BUG "]
     print(f"{len(results)} checks · {len(bugs)} BUGS")
