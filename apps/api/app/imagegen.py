@@ -24,6 +24,7 @@ the report captions it. Do not quietly present these as finished work.
 """
 
 import base64
+import os
 import urllib.parse
 from typing import Callable, NamedTuple
 
@@ -38,12 +39,26 @@ _GEMINI_URL = (
 )
 _FREE_URL = "https://image.pollinations.ai/prompt/"
 # hf-inference deprecated FLUX (HTTP 410), so this goes through the router to fal-ai,
-# which serves it at 1024x1024 as a ~350KB JPEG — a quarter the bytes of the same image
-# from nscale's inline PNG, which matters when three of them embed into a report PDF.
-_FLUX_URL = "https://router.huggingface.co/fal-ai/fal-ai/flux/schnell"
+# which serves 1024x1024 as a ~300KB JPEG — a quarter the bytes of the same image from
+# nscale's inline PNG, which matters when three embed into a report PDF.
+#
+# FLUX.1-Krea-dev over schnell, decided by looking at the output rather than the
+# benchmark: Krea is tuned specifically for photorealism and returns real travertine
+# aggregate, book-matched walnut grain, brushed brass and linen weave with correct light
+# falloff, where schnell returns a softer approximation. It is 8x the price ($0.025 vs
+# $0.003 per megapixel, both verified on fal.ai on 2026-08-07) and ~2s slower, which is
+# the right trade for an image that goes in front of a paying client. Override with
+# MEYRAKI_FLUX_MODEL to drop to `fal-ai/flux/schnell` when volume matters more than
+# fidelity — the price table below prices whichever one is selected.
+FLUX_MODEL = os.environ.get("MEYRAKI_FLUX_MODEL", "fal-ai/flux/krea")
+_FLUX_URL = f"https://router.huggingface.co/fal-ai/{FLUX_MODEL}"
 
 MIN_IMAGE_BYTES = 5_000       # below this it is an error page or a placeholder, not a render
-FINAL_QUALITY_PROVIDERS = frozenset({"gemini", "flux"})  # everything else is draft
+def is_final_quality(provider: str) -> bool:
+    """Contracted providers deliver client visuals; the free tier delivers direction."""
+    return provider == "gemini" or provider.startswith("flux-")
+
+
 NEEDS_COOLDOWN = frozenset({"pollinations"})  # only the free tier 429s on back-to-back calls
 DRAFT_MIN_LONG_EDGE = 1024    # the free tier silently caps at 768 whatever we ask for
 MAX_IMAGE_BYTES = 12_000_000  # above this the PDF data-URI bloat is a DoS (review M8)
@@ -74,10 +89,7 @@ class Render(NamedTuple):
     @property
     def is_draft(self) -> bool:
         """Draft unless a contracted provider returned it at a usable resolution."""
-        return (
-            self.provider not in FINAL_QUALITY_PROVIDERS
-            or max(self.pixels) < DRAFT_MIN_LONG_EDGE
-        )
+        return not is_final_quality(self.provider) or max(self.pixels) < DRAFT_MIN_LONG_EDGE
 
 
 def media_type(data: bytes) -> str:
@@ -163,6 +175,32 @@ def _gemini(prompt: str) -> Render:
     return _classify(extract_image(response.json()), "gemini")
 
 
+def _billable_units(headers) -> float:
+    """What fal says it charged, defaulting to one unit when it says nothing usable.
+
+    A trust boundary, and it bit twice: `float("1,5")` from a locale-formatted upstream
+    raised out of the provider before the charge was booked, so the chain fell through to
+    the free tier — the client got a DRAFT for a 1024px render we had already paid for,
+    and the receipt said $0.00. `inf` was worse: it tripped the analysis budget and
+    aborted a paying client's report after the renders had succeeded.
+    """
+    import math
+
+    raw = headers.get("x-fal-billable-units")
+    try:
+        units = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(units) or units <= 0:
+        return 1.0
+    return units
+
+
+def _flux_provider() -> str:
+    """Provider label that names the model, so the receipt says which one was billed."""
+    return "flux-" + FLUX_MODEL.rsplit("/", 1)[-1]
+
+
 def _flux(prompt: str) -> Render:
     """FLUX.1-schnell through Hugging Face Inference Providers."""
     if not settings.HUGGINGFACE_API_TOKEN:
@@ -177,13 +215,16 @@ def _flux(prompt: str) -> Render:
         timeout=FLUX_TIMEOUT,
     )
     response.raise_for_status()
+    # fal reports what it actually charged. Billing from that beats assuming one image
+    # is one charge: it is priced per megapixel, so a larger render costs proportionally
+    # more and the receipt still reconciles.
+    costs.record_image("moodboard", _flux_provider(), _billable_units(response.headers))
     try:
         images = response.json().get("images") or []
     except ValueError as exc:  # 200 with a non-JSON body
         raise RuntimeError(f"FLUX returned an unreadable response ({exc})") from exc
     if not images or not images[0].get("url"):
         raise RuntimeError("FLUX returned no image url")
-    costs.record_image("moodboard", "flux")
     # The generation is already paid for by this point, so say plainly when it is the
     # delivery that failed rather than the generation — otherwise a bad media host looks
     # like a model problem and sends whoever reads the note to the wrong place.
@@ -194,7 +235,7 @@ def _flux(prompt: str) -> Render:
         raise RuntimeError(
             f"FLUX generated an image but its delivery failed ({type(exc).__name__})"
         ) from exc
-    return _classify(fetched.content, "flux")
+    return _classify(fetched.content, _flux_provider())
 
 
 def _free(prompt: str) -> Render:

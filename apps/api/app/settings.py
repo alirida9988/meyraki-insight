@@ -34,6 +34,16 @@ WEB_ORIGINS = [
     for o in os.environ.get("MEYRAKI_WEB_ORIGINS", "http://localhost:3000").split(",")
     if o.strip()
 ]
+if "*" in WEB_ORIGINS:
+    # Sessions are cookie-based, so CORS runs with allow_credentials=True. A wildcard
+    # there lets ANY site read a signed-in studio's analyses and report PDFs from the
+    # visitor's browser. Refuse at startup rather than serve it: an operator reaching for
+    # "*" to make CORS "just work" would otherwise never learn what it opened.
+    raise RuntimeError(
+        'MEYRAKI_WEB_ORIGINS="*" is refused: sessions are cookie-based, so a wildcard '
+        "origin would let any website read a logged-in studio's reports. List the exact "
+        "origins, comma-separated."
+    )
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

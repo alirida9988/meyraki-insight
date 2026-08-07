@@ -83,6 +83,115 @@ jobs:
         working-directory: apps/web
         run: pnpm build
 
+  images:
+    name: Docker · api + web build
+    runs-on: ubuntu-latest
+    # Runs on every PR. The first build is slow (Chromium plus the scientific stack);
+    # after that the GitHub Actions cache below makes it cheap, and a deployment that
+    # only gets built at deploy time is a deployment nobody has tested.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          load: true
+          tags: meyraki-api:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api
+
+      - name: The image must actually be able to render a PDF
+        # The report deliverable is printed by Chromium inside this image. An image that
+        # builds but cannot launch a browser passes every other check and ships broken.
+        run: |
+          docker run --rm meyraki-api:ci python -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              b = p.chromium.launch(); page = b.new_page()
+              page.set_content('<h1>meyraki</h1>'); pdf = page.pdf(format='A4'); b.close()
+          assert pdf.startswith(b'%PDF-'), 'no PDF produced'
+          print('chromium rendered', len(pdf), 'bytes of PDF')
+          "
+
+      - name: The installed package must not be a stub
+        # The builder installs from manifests first for layer caching; without the second
+        # source install, site-packages holds an `app` package containing only
+        # __init__.py, shadowed at runtime by the working directory purely by accident.
+        run: |
+          docker run --rm -w / meyraki-api:ci python -c "
+          import app, glob, os
+          mods = glob.glob(os.path.join(os.path.dirname(app.__file__), '*.py'))
+          assert len(mods) > 5, f'site-packages holds a stub: {len(mods)} modules'
+          print('installed package is complete:', len(mods), 'modules')
+          "
+
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          load: true
+          tags: meyraki-web:ci
+          build-args: NEXT_PUBLIC_API_URL=http://localhost:8000
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      - name: The web image must actually start and serve its assets
+        # `docker run --rm image id -u` overrides the CMD, so it proves nothing about the
+        # entrypoint. This image once crash-looped on a wrong server.js path, and once
+        # served an unstyled login page with every /_next/static asset 404ing — both
+        # invisible to any check that does not start it and follow a real reference.
+        run: |
+          docker run -d --name web -p 3000:3000 meyraki-web:ci
+          for i in $(seq 1 30); do
+            curl -sf -o /tmp/login.html http://127.0.0.1:3000/login && break
+            sleep 2
+          done
+          curl -sf -o /tmp/login.html http://127.0.0.1:3000/login || {
+            echo "::error::the web container never served /login"; docker logs web; exit 1; }
+          asset=$(grep -o '/_next/static/[^"]*\.js' /tmp/login.html | head -1)
+          if [ -n "$asset" ]; then
+            curl -sf -o /dev/null "http://127.0.0.1:3000$asset" || {
+              echo "::error::static assets 404 — the page renders unstyled"; exit 1; }
+            echo "served /login and its asset $asset"
+          else
+            echo "::error::/login referenced no static asset — suspicious"; exit 1
+          fi
+          docker rm -f web
+
+      - name: Both images run as a non-root user
+        run: |
+          for image in meyraki-api:ci meyraki-web:ci; do
+            uid=$(docker run --rm --entrypoint id "$image" -u)
+            echo "$image runs as uid $uid"
+            [ "$uid" != "0" ] || { echo "::error::$image runs as root"; exit 1; }
+          done
+
+      - name: The compose file is valid and never binds to a public interface
+        # Assert every published port IS loopback, rather than grepping for the bad case:
+        # `docker compose config` puts host_ip on its own line, and a bare "3000:3000"
+        # (every interface) emits no host_ip line at all — so the negative grep passed a
+        # deliberately public binding.
+        run: |
+          docker compose config --quiet
+          published=$(docker compose config | grep -c 'published:' || true)
+          loopback=$(docker compose config | grep -c 'host_ip: 127\.0\.0\.1' || true)
+          echo "$published published port(s), $loopback bound to loopback"
+          [ "$published" = "$loopback" ] || {
+            echo "::error::a published port is not loopback-only — compose terminates no TLS"
+            docker compose config | grep -A2 'published:'
+            exit 1
+          }
+        env:
+          POSTGRES_PASSWORD: ci-not-a-real-password
+          ANTHROPIC_API_KEY: sk-ant-ci-not-a-real-key
+
 # NOT run here, by design:
 #   apps/web/e2e (Playwright)  — needs the live stack + paid model calls
 #   apps/api/tests/qa_hunt.py  — same

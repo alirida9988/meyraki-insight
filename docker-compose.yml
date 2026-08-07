@@ -1,0 +1,86 @@
+# Meyraki Insight — the whole stack, as it runs in production.
+#
+#   cp .env.example .env      # then fill in the keys
+#   docker compose up --build
+#
+# Ports are published on 127.0.0.1 only. Nothing here terminates TLS or authenticates
+# at the edge, so binding these to a public interface would expose Postgres and an
+# HTTP-only API to the internet. Put a TLS proxy in front and see the deployment
+# requirements in README.md before exposing anything.
+
+name: meyraki
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: meyraki
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: meyraki
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Deliberately NOT published. The API reaches Postgres over the compose network, so
+    # a host port is pure extra surface — and it collides with any other Postgres already
+    # running. To inspect it by hand, either exec into the container
+    #   docker compose exec db psql -U meyraki meyraki
+    # or forward it for the session
+    #   docker compose run --rm -p 127.0.0.1:5433:5432 db
+    healthcheck:
+      # -d as well as -U: without the database name pg_isready reports ready before the
+      # named database exists, and the API's first connection then fails.
+      test: ["CMD-SHELL", "pg_isready -U meyraki -d meyraki"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://meyraki:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/meyraki
+      UPLOAD_DIR: /data/uploads
+      MEYRAKI_WEB_ORIGINS: ${MEYRAKI_WEB_ORIGINS:-http://localhost:3000}
+      # Behind a TLS proxy set MEYRAKI_HTTPS=1 and MEYRAKI_TRUST_PROXY=1 in .env, or the
+      # session cookie ships without Secure and the rate limiter sees the proxy's IP as
+      # every client (README § Deployment requirements).
+      MEYRAKI_HTTPS: ${MEYRAKI_HTTPS:-0}
+      MEYRAKI_TRUST_PROXY: ${MEYRAKI_TRUST_PROXY:-0}
+      MEYRAKI_ANALYSIS_BUDGET_USD: ${MEYRAKI_ANALYSIS_BUDGET_USD:-1.50}
+      MEYRAKI_FLUX_MODEL: ${MEYRAKI_FLUX_MODEL:-fal-ai/flux/krea}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      HUGGINGFACE_API_TOKEN: ${HUGGINGFACE_API_TOKEN:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      # A NAMED volume inherits /data/uploads' ownership from the image, so uid 10001 can
+      # write to it. A bind mount does not: `- /srv/uploads:/data/uploads` arrives owned
+      # by root and the first upload fails in production while passing in every dev run.
+      # If you bind-mount, `chown 10001:10001` the host directory first.
+      - uploads:/data/uploads
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the browser bundle at build time, so changing it needs a rebuild,
+        # not a restart. Must be the URL the BROWSER can reach — not the compose service
+        # name, which only resolves inside the network.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  uploads:

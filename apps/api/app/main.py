@@ -10,7 +10,7 @@ from fastapi.responses import Response, StreamingResponse
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -128,7 +128,20 @@ def me(user: User = Depends(auth_mod.current_user), session: Session = Depends(g
 
 
 @app.get("/health")
-def health() -> dict:
+def health(response: Response, session: Session = Depends(get_session)) -> dict:
+    """Liveness AND the one dependency without which nothing works.
+
+    This used to return ok without touching the database. With Postgres stopped, Docker
+    reported the container healthy, `restart: unless-stopped` never fired, and the web
+    service's `depends_on: service_healthy` gated on that — while every real endpoint
+    returned 500. A health check that cannot fail is decoration.
+    """
+    try:
+        session.execute(text("select 1"))
+    except Exception as exc:  # noqa: BLE001 — the reason belongs in the response
+        response.status_code = 503
+        return {"status": "unavailable", "database": str(exc)[:120],
+                "contracts": CONTRACT_VERSION}
     return {"status": "ok", "contracts": CONTRACT_VERSION}
 
 

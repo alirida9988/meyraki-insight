@@ -49,11 +49,11 @@ def test_ledger_accumulates_tokens_and_images():
     token = costs.start_ledger()
     try:
         costs.record_tokens("zones", "claude-sonnet-5", 1_000_000, 0)   # $3
-        costs.record_image("moodboard", "flux")                          # $0.003
+        costs.record_image("moodboard", "flux-krea")                     # $0.025
         costs.record_image("moodboard", "pollinations")                  # free
-        assert costs.spent_usd() == pytest.approx(3.003)
+        assert costs.spent_usd() == pytest.approx(3.025)
         assert len(costs.entries()) == 3
-        assert "claude-sonnet-5" in costs.summary() and "image:flux" in costs.summary()
+        assert "claude-sonnet-5" in costs.summary() and "image:flux-krea" in costs.summary()
     finally:
         costs.stop_ledger(token)
 

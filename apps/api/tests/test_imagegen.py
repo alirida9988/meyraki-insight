@@ -124,11 +124,12 @@ def test_flux_provider_requires_a_token(monkeypatch):
 def test_flux_counts_as_final_quality_and_needs_no_cooldown():
     """FLUX returns a true 1024px render with real material definition, so it is not
     captioned as draft — and being a paid provider it does not rate-limit us."""
-    assert "flux" in imagegen.FINAL_QUALITY_PROVIDERS
-    assert "flux" not in imagegen.NEEDS_COOLDOWN
-    assert not Render(JPG, ".jpg", "flux", (1024, 1024)).is_draft
+    provider = imagegen._flux_provider()
+    assert imagegen.is_final_quality(provider)
+    assert provider not in imagegen.NEEDS_COOLDOWN
+    assert not Render(JPG, ".jpg", provider, (1024, 1024)).is_draft
     # ...but an under-resolution result from any provider is still draft
-    assert Render(JPG, ".jpg", "flux", (512, 512)).is_draft
+    assert Render(JPG, ".jpg", provider, (512, 512)).is_draft
 
 
 def test_flux_is_tried_before_the_free_tier(monkeypatch):
@@ -141,6 +142,7 @@ def test_flux_is_tried_before_the_free_tier(monkeypatch):
 def test_flux_reports_a_missing_image_url_instead_of_crashing(monkeypatch):
     class _Response:
         status_code = 200
+        headers: dict = {}
 
         def raise_for_status(self):
             return None
@@ -316,6 +318,8 @@ def test_flux_distinguishes_a_delivery_failure_from_a_generation_failure(monkeyp
     """The image is already paid for once the URL comes back, so a bad media host must
     not read as a model problem — that sends whoever reads the note to the wrong place."""
     class _Posted:
+        headers = {"x-fal-billable-units": "1"}
+
         def raise_for_status(self):
             return None
 
@@ -336,6 +340,8 @@ def test_flux_distinguishes_a_delivery_failure_from_a_generation_failure(monkeyp
 
 def test_flux_reports_an_unreadable_body_instead_of_a_json_traceback(monkeypatch):
     class _Posted:
+        headers: dict = {}
+
         def raise_for_status(self):
             return None
 
@@ -348,3 +354,91 @@ def test_flux_reports_an_unreadable_body_instead_of_a_json_traceback(monkeypatch
     monkeypatch.setattr(imagegen.httpx, "post", lambda *a, **k: _Posted())
     with pytest.raises(RuntimeError, match="unreadable response"):
         imagegen._flux("x")
+
+
+def test_the_flux_model_is_named_in_the_provider_label_and_priced_accordingly():
+    """The receipt has to say WHICH model was billed: krea costs 8x schnell, so a label
+    of just "flux" would make the money line unauditable."""
+    from app import costs
+
+    assert imagegen._flux_provider() == "flux-" + imagegen.FLUX_MODEL.rsplit("/", 1)[-1]
+    assert imagegen._flux_provider() in costs.IMAGE_PRICES_USD, "the selected model must be priced"
+    assert costs.IMAGE_PRICES_USD["flux-krea"] > costs.IMAGE_PRICES_USD["flux-schnell"]
+
+
+def test_every_flux_model_counts_as_final_quality():
+    """Draft-vs-final keys on the provider, and the label now carries a model suffix —
+    a substring check that missed it would caption real renders as drafts."""
+    for model in ("flux-krea", "flux-dev", "flux-schnell"):
+        assert imagegen.is_final_quality(model)
+        assert not Render(JPG, ".jpg", model, (1024, 1024)).is_draft
+    assert not imagegen.is_final_quality("pollinations")
+    assert imagegen.is_final_quality("gemini")
+
+
+def test_image_cost_follows_the_units_the_provider_reports():
+    """fal prices per megapixel, so a larger render bills more than one unit."""
+    from app import costs
+
+    token = costs.start_ledger()
+    try:
+        costs.record_image("moodboard", "flux-krea", units=1.0)
+        assert costs.spent_usd() == pytest.approx(0.025)
+        costs.record_image("moodboard", "flux-krea", units=4.0)   # a 2048x2048 render
+        assert costs.spent_usd() == pytest.approx(0.125)
+    finally:
+        costs.stop_ledger(token)
+
+
+# Adversarial review of the deployment (2026-08-07): the billable-units header is a
+# trust boundary, and mishandling it threw away renders we had already paid for.
+
+@pytest.mark.parametrize("raw,expected", [
+    ("1", 1.0),
+    ("2.5", 2.5),
+    ("abc", 1.0),        # a garbage value must not lose the charge
+    ("1,5", 1.0),        # locale-formatted upstream — raised out of the provider before
+    (None, 1.0),         # header absent entirely
+    ("", 1.0),
+    ("inf", 1.0),        # tripped the analysis budget and aborted a paying client's run
+    ("1e400", 1.0),      # overflows to inf
+    ("nan", 1.0),
+    ("-3", 1.0),         # a real charge must never be recorded as free
+    ("0", 1.0),
+])
+def test_billable_units_never_loses_or_explodes_a_charge(raw, expected):
+    headers = {} if raw is None else {"x-fal-billable-units": raw}
+    assert imagegen._billable_units(headers) == pytest.approx(expected)
+
+
+def test_a_garbage_units_header_still_bills_and_still_returns_a_final_render(monkeypatch):
+    """The whole failure: fal generated and delivered a 1024px image, we paid, and the
+    client got a draft with a $0.00 receipt because the header would not parse."""
+    from app import costs, settings
+
+    class _Posted:
+        headers = {"x-fal-billable-units": "1,5"}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"images": [{"url": "https://media.example/x.jpg"}]}
+
+    class _Fetched:
+        content = JPG
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(settings, "HUGGINGFACE_API_TOKEN", "hf_test")
+    monkeypatch.setattr(imagegen.httpx, "post", lambda *a, **k: _Posted())
+    monkeypatch.setattr(imagegen.httpx, "get", lambda *a, **k: _Fetched())
+
+    token = costs.start_ledger()
+    try:
+        render = imagegen._flux("a lobby")
+        assert not render.is_draft, "a paid 1024px render must not be captioned draft"
+        assert costs.spent_usd() > 0, "a paid render must not be recorded as free"
+    finally:
+        costs.stop_ledger(token)
