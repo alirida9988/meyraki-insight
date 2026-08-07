@@ -224,21 +224,40 @@ def step_moodboard(ctx: Ctx) -> Moodboard:
         board = agents.run_moodboard(
             ctx.analysis.project.space_type, objectives, ctx.analysis.brief, graph
         )
-        keys, errors, providers = agents.generate_moodboard_images(
+        from . import imagegen
+
+        keys, errors, renders = agents.generate_moodboard_images(
             board.style_name, board.materials, ctx.analysis.project.space_type, graph
         )
-        if errors or providers:
+        providers = sorted({r.provider for r in renders})
+        # Draft if ANY render came from the fallback: a report cannot caption half its
+        # images as final and half as draft, so the weaker claim governs the set.
+        draft = any(r.is_draft for r in renders)
+        if errors or renders:
             # Always visible, never fatal: renders are an enhancement over
             # palette/materials, and which provider served them is operator info.
-            via = f" via {', '.join(sorted(set(providers)))}" if providers else ""
-            reason = f" ({errors[0][:80]})" if errors else ""
+            via = f" via {', '.join(providers)}" if providers else ""
+            size = imagegen.describe_resolution(renders)
+            quality = " — DRAFT quality, captioned as such in the report" if draft else ""
+            # generate_render raises one joined string per failed render listing EVERY
+            # provider it tried. Truncating that to 80 chars showed only the first
+            # provider, hiding the line that actually tells the operator what to do —
+            # "flux: 402 you have depleted your monthly included credits".
+            reason = ""
+            if errors:
+                parts = [p.strip()[:90] for p in errors[0].split(";") if p.strip()]
+                reason = " (" + " | ".join(parts) + ")"
             _emit(
                 ctx.session,
                 ctx.analysis.id,
                 "step",
-                f"moodboard: {len(keys)}/3 renders generated{via}{reason} — continuing",
+                f"moodboard: {len(keys)}/3 renders generated{via}{size}{reason}{quality} — continuing",
             )
-        return board.model_copy(update={"image_keys": keys})
+        return board.model_copy(update={
+            "image_keys": keys,
+            "render_provider": ", ".join(providers) or None,
+            "renders_are_draft": draft,
+        })
     return Moodboard(
         style_name="Serene boutique",
         palette=["#FBFAF7", "#1C4A3E", "#B08D57"],

@@ -49,6 +49,8 @@ type MoodboardOut = {
   furniture_notes: string[];
   lighting_concept: string | null;
   image_keys: string[];
+  render_provider: string | null;
+  renders_are_draft: boolean;
 };
 type AnalysisSummary = {
   id: string;
@@ -705,6 +707,17 @@ export default function ProjectsPage() {
                         />
                       ))}
                     </div>
+                  )}
+                  {results.moodboard.renders_are_draft && (
+                    <p
+                      data-testid="moodboard-draft-note"
+                      className="mt-2 font-mono text-[11px] uppercase tracking-wide text-graphite"
+                    >
+                      Draft renders{results.moodboard.render_provider
+                        ? ` · ${results.moodboard.render_provider}`
+                        : ""}{" "}
+                      — mood and material direction, not final visuals
+                    </p>
                   )}
                   <div className="mt-3 flex gap-2">
                     {results.moodboard.palette.map((hex) => (

@@ -37,6 +37,9 @@ WEB_ORIGINS = [
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# Hugging Face Inference Providers token — routes to FLUX.1-schnell for final-quality
+# renders while the Gemini billing hold stands. Billed through the HF account.
+HUGGINGFACE_API_TOKEN = os.environ.get("HUGGINGFACE_API_TOKEN", "")
 
 
 def agents_enabled() -> bool:

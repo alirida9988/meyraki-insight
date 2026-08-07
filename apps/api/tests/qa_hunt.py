@@ -14,6 +14,11 @@ from PIL import Image
 
 BASE = "http://localhost:8000"
 RUN = str(int(time.time()))
+# Poll deadline per analysis. Raised from 120 when the moodboard step started pacing its
+# renders: the free provider 429s on back-to-back requests, so three renders are spaced
+# ~12s apart to deliver 3/3 instead of 1/3, costing ~60s. A deadline below the real
+# pipeline time reports a product bug that is really our own impatience.
+POLL_TICKS = 240   # x 2s = 480s
 results: list[tuple[str, str, str]] = []  # (verdict, scenario, detail)
 
 
@@ -162,7 +167,7 @@ def main() -> int:
                    json={"floorplan_upload_id": big_id, "objectives": ["guest_flow"]})
         aid = r.json().get("id")
         detail = {}
-        for _ in range(120):
+        for _ in range(POLL_TICKS):
             detail = c.get(f"/analyses/{aid}").json()
             if detail["status"] in ("done", "failed", "rejected"):
                 break
@@ -177,7 +182,7 @@ def main() -> int:
                    json={"floorplan_upload_id": pdf_id, "objectives": ["guest_flow"]})
         aid = r.json().get("id")
         detail = {}
-        for _ in range(120):
+        for _ in range(POLL_TICKS):
             detail = c.get(f"/analyses/{aid}").json()
             if detail["status"] in ("done", "failed", "rejected"):
                 break
@@ -198,7 +203,7 @@ def main() -> int:
                     json={"floorplan_upload_id": jpg_id, "objectives": ["ambiance"]}).json().get("id")
         record(a1 != a2 and bool(a1) and bool(a2), "two concurrent analyses accepted", f"{a1} / {a2}")
         for aid in (a1, a2):
-            for _ in range(120):
+            for _ in range(POLL_TICKS):
                 d = c.get(f"/analyses/{aid}").json()
                 if d["status"] in ("done", "failed", "rejected"):
                     break

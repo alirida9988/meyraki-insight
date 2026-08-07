@@ -11,6 +11,7 @@ import pydantic
 from pydantic import BaseModel, Field
 
 from meyraki_contracts import (
+    SCORE_EXCLUDED,
     FlowReport,
     FootfallStatus,
     IntakeManifest,
@@ -477,9 +478,16 @@ Rules:
     )
 
 
+# Zones worth naming in a hero shot: guest-facing, and somewhere a guest lingers.
+# This used to be a third hardcoded list that disagreed with the other two — it omitted
+# meeting rooms — so it now derives from the shared vocabulary in the contracts package.
+HERO_SHOT_ZONES = frozenset(ZoneCategory) - SCORE_EXCLUDED - {
+    ZoneCategory.ENTRANCE, ZoneCategory.CORRIDOR, ZoneCategory.OTHER
+}
+
+
 def render_prompts(style: str, materials: list[str], space_type: str, graph: ZoneGraph) -> list[str]:
-    guest_zones = [z.label for z in graph.zones if z.category.value in
-                   ("lobby", "lounge", "dining", "bar", "reception", "terrace", "workspace")][:4]
+    guest_zones = [z.label for z in graph.zones if z.category in HERO_SHOT_ZONES][:4]
     base = (
         f"Photorealistic interior design render of a {space_type}, {style} style. "
         f"Materials: {', '.join(materials)}. Natural light, editorial photography, "
@@ -494,25 +502,54 @@ def render_prompts(style: str, materials: list[str], space_type: str, graph: Zon
 
 def generate_moodboard_images(
     style: str, materials: list[str], space_type: str, graph: ZoneGraph
-) -> tuple[list[str], list[str], list[str]]:
-    """3 interior renders → (storage keys, errors, providers used).
+) -> tuple[list[str], list[str], list["imagegen.Render"]]:
+    """3 interior renders → (storage keys, errors, the Render records).
+
+    The Render records carry provider and pixel size so the caller can caption
+    draft-quality output in the client report instead of passing it off as final.
 
     Renders are an enhancement: the caller decides how to surface failures —
     never by failing the analysis, never silently (pipeline emits a register note).
     """
     from . import imagegen, storage
 
+    import time
+
     keys: list[str] = []
     errors: list[str] = []
-    providers: list[str] = []
-    for prompt in render_prompts(style, materials, space_type, graph):
+    renders: list[imagegen.Render] = []
+    started = time.monotonic()
+    prompts = render_prompts(style, materials, space_type, graph)
+    for index, prompt in enumerate(prompts):
+        elapsed = time.monotonic() - started
+        if elapsed > imagegen.RENDER_BUDGET_S:
+            errors.append(
+                f"render budget of {imagegen.RENDER_BUDGET_S:.0f}s reached after "
+                f"{len(keys)} render(s) — remaining {len(prompts) - index} skipped"
+            )
+            break
+        # The free provider refuses back-to-back requests (measured: 429 at 0s, 3s and
+        # 6s gaps), which is why only one of three renders used to survive. Space them —
+        # including after a failed attempt, since a rate limit is the likeliest cause.
+        # Paid providers do not need it, so a run served by FLUX or Gemini pays nothing.
+        # `or errors` matters: renders 1 and 2 can succeed on a paid provider (no
+        # spacing needed) and then render 3 drops to the free tier mid-batch. Without
+        # this it arrives with no cooldown and is refused, which is exactly what
+        # happened when FLUX ran out of credits partway through a batch.
+        used_free = (
+            not renders
+            or bool(errors)
+            or any(r.provider in imagegen.NEEDS_COOLDOWN for r in renders)
+        )
+        if index and used_free and imagegen.FREE_COOLDOWN_S:
+            time.sleep(imagegen.FREE_COOLDOWN_S)
         try:
             render = imagegen.generate_render(prompt)
             keys.append(storage.save(render.data, render.suffix))
-            providers.append(render.provider)
+            renders.append(render)
         except Exception as exc:  # noqa: BLE001 — collected for the caller
-            errors.append(str(exc)[:200])
-    return keys, errors, providers
+            errors.append(str(exc)[:500])
+    return keys, errors, renders
 
 
 # ---------------------------------------------------------------- Report Writer
