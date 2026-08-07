@@ -10,7 +10,12 @@
 FROM node:22-slim AS deps
 RUN corepack enable
 WORKDIR /app/apps/web
-COPY apps/web/package.json apps/web/pnpm-lock.yaml ./
+# pnpm-workspace.yaml belongs here too, not just in the builder stage. It carries
+# `allowBuilds`, which is how this project declares that sharp and unrs-resolver must NOT
+# run their install scripts. Without it pnpm finishes resolving, prints
+# "[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: unrs-resolver" and exits non-zero —
+# an install that reads as complete in the log and still fails the build.
+COPY apps/web/package.json apps/web/pnpm-lock.yaml apps/web/pnpm-workspace.yaml ./
 # The Next tarballs are large and this install has to survive a slow or flaky link — the
 # defaults aborted mid-download and failed the whole build. These go in .npmrc because
 # that is what pnpm reads; the equivalent npm_config_* environment variables are ignored
