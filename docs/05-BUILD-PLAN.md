@@ -81,8 +81,19 @@ ingestion.
   model credits, so it runs before a claim rather than on every push); snapshot tests for
   the heatmap renderer and the report ✅ `tests/test_snapshots.py`, pinned by pixel hash
   and by HTML with the date normalised, and verified to fail on a one-digit colour change;
-  contract tests for every agent prompt (schema-valid on 3 seeds) — **still open**, since
-  each seed is a paid call.
+  contract tests for every agent prompt (schema-valid on 3 seeds) ✅
+  `tests/prompt_contracts.py`, opt-in for the same reason — **15/15 seeds, $0.58**.
+  It measures output-budget headroom rather than only pass/fail, because the SDK already
+  enforces the schema: the real failure mode is truncation at `max_tokens`, which surfaces
+  as `EOF while parsing` and names the schema instead of the budget. Seeds are the worst
+  realistic case (12-zone hotel, every objective, Arabic), and ceilings are read from the
+  value `_parse` is actually called with, so they cannot drift from `agents.py`.
+  **Finding: an Arabic report consumes 2.1× the output tokens of the identical English
+  one** (17.8% vs 8.4% of 16000). That is the measured cause of the Arabic truncation bug
+  — at the old 4096 ceiling the same document sat near 70% of budget — and it makes
+  "roughly double the English budget" the design rule for any Arabic-facing prompt.
+  Headroom today: intake 4–6% of 2048 · zones 5–38% · layout 15–19% · moodboard 10–12%
+  of 4096 · report 7–18%.
 - QA Verifier step blocks delivery of internally inconsistent results.
 - Full audit trail per job → any bad output is reproducible and diagnosable.
 - Staging environment runs the full pipeline nightly on the golden set; cost + accuracy
