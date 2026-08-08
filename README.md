@@ -91,6 +91,30 @@ Two things that bite if you skip them:
   `Secure`; without the second the rate limiter sees the proxy's IP as every client, so
   one visitor can exhaust everyone's quota.
 
-There is no migration tool: `Base.metadata.create_all` creates missing tables on start
-but never alters an existing one. A new table lands on an existing database; a new
-*column* does not, and needs a hand-written migration until Alembic is added.
+### Schema changes
+
+Alembic owns the schema on Postgres. The API image runs `alembic upgrade head` on start,
+before uvicorn, so a failed migration stops the container rather than leaving it serving
+against a half-built schema.
+
+```bash
+cd apps/api
+alembic revision --autogenerate -m "what changed"   # after editing app/models.py
+alembic upgrade head                                 # apply
+alembic check                                        # models and migrations agree? CI runs this
+```
+
+`init_db()` still calls `create_all`, but **only on SQLite** — the test and local path,
+where a schema is built and discarded in the same second. On any other database it does
+nothing, because `create_all` there is a trap: it makes the tables but writes no
+`alembic_version` row, so the next `alembic upgrade head` tries to create tables that
+already exist and fails. It also never ALTERs anything, which is how this repo's own dev
+database silently lost an index and a foreign key the models declare.
+
+**An existing database that predates Alembic** needs stamping once, or the baseline
+migration will try to recreate its tables:
+
+```bash
+alembic stamp head        # "this database is already at the baseline"
+alembic check             # then confirm it really matches the models
+```

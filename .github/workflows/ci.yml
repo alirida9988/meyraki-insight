@@ -16,6 +16,20 @@ jobs:
   api:
     name: API · contracts · offline suite
     runs-on: ubuntu-latest
+    services:
+      # Only the migration check needs it — the test suite itself runs on SQLite and
+      # never opens a socket.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: meyraki
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: meyraki_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meyraki -d meyraki_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v7
 
@@ -37,6 +51,17 @@ jobs:
           MEYRAKI_USE_AGENTS: "off"
           MEYRAKI_RATELIMIT: "off"
         run: python -m pytest tests ../../packages/contracts/tests -q
+
+      - name: Migrations build the schema, and match the models
+        # `alembic check` is the drift guard. Without it, models and migrations diverge
+        # silently — this repo's own dev database had already lost an index and a foreign
+        # key that way, because create_all makes tables but never alters them.
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+psycopg://meyraki:ci@localhost:5432/meyraki_ci
+        run: |
+          alembic upgrade head
+          alembic check
 
       - name: Guard — the offline suite cannot reach a model, even with a key present
         working-directory: apps/api
@@ -109,7 +134,7 @@ jobs:
         # The report deliverable is printed by Chromium inside this image. An image that
         # builds but cannot launch a browser passes every other check and ships broken.
         run: |
-          docker run --rm meyraki-api:ci python -c "
+          docker run --rm --entrypoint python meyraki-api:ci -c "
           from playwright.sync_api import sync_playwright
           with sync_playwright() as p:
               b = p.chromium.launch(); page = b.new_page()
@@ -118,12 +143,35 @@ jobs:
           print('chromium rendered', len(pdf), 'bytes of PDF')
           "
 
+      - name: The pedestrian simulation must run inside the image
+        # The image deliberately strips jupedsim's desktop viewer (PySide6 + VTK, 1.3 GB
+        # a headless server cannot use). If a future version imports them at module
+        # level, the flow step would fall back to distance decay in production and
+        # nothing else here would notice.
+        run: |
+          docker run --rm -e MEYRAKI_USE_AGENTS=off -w /app/apps/api --entrypoint python meyraki-api:ci -c "
+          from app import pedestrian
+          from app.agents import WireAdjacency, WirePoint, WireZone, WireZoneGraph, repair_zone_graph
+          def wz(i, c, pts):
+              return WireZone(id=i, category=c, label=i, confidence=0.9,
+                              polygon=[WirePoint(x=x, y=y) for x, y in pts])
+          g = repair_zone_graph(WireZoneGraph(zones=[
+              wz('entrance','entrance',[(0,.75),(.3,.75),(.3,1),(0,1)]),
+              wz('lobby','lobby',[(0,.3),(.55,.3),(.55,.75),(0,.75)]),
+              wz('cafe','dining',[(.55,.3),(1,.3),(1,.8),(.55,.8)])],
+              adjacency=[WireAdjacency(a='entrance',b='lobby'), WireAdjacency(a='lobby',b='cafe')],
+              entrances=['entrance']))
+          i, notes, reason = pedestrian.simulate(g)
+          assert i is not None, f'simulation declined: {reason}'
+          print('jupedsim ran headless:', i)
+          "
+
       - name: The installed package must not be a stub
         # The builder installs from manifests first for layer caching; without the second
         # source install, site-packages holds an `app` package containing only
         # __init__.py, shadowed at runtime by the working directory purely by accident.
         run: |
-          docker run --rm -w / meyraki-api:ci python -c "
+          docker run --rm -w / --entrypoint python meyraki-api:ci -c "
           import app, glob, os
           mods = glob.glob(os.path.join(os.path.dirname(app.__file__), '*.py'))
           assert len(mods) > 5, f'site-packages holds a stub: {len(mods)} modules'
