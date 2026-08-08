@@ -1,10 +1,16 @@
 """Moodboard interior renders — provider chain (docs/04-REUSE-MAP §2).
 
-Order: Gemini 2.5 Flash Image (contracted, auto-preferred the moment its key has quota)
-→ FLUX.1-schnell via Hugging Face Inference Providers (final quality, needs a token)
-→ Pollinations (keyless, free, DRAFT quality) so the product is never blocked on a
-billing state. First success wins; every provider failure is collected and surfaced by
-the caller, never swallowed.
+Order: FLUX.1-Krea-dev via Hugging Face Inference Providers (primary) → Gemini 2.5 Flash
+Image (fallback) → Pollinations (keyless, free, DRAFT quality) so the product is never
+blocked on a billing state. First success wins; every provider failure is collected and
+surfaced by the caller, never swallowed.
+
+FLUX leads on evidence, not on the research note that once called Gemini "best
+quality-per-dollar": Krea is measured at $0.025/megapixel against Gemini's $0.039/image,
+it is verified working, and every render this product has ever shipped came from it —
+Gemini has returned 429 on every attempt since the key was installed, so its quality here
+is entirely unmeasured. Cheaper and proven beats dearer and assumed. When the OpenAI
+account is funded, gpt-image slots in behind FLUX as the fallback tier.
 
 Measured 2026-08-06 on the same prompt: FLUX returns a true 1024x1024 in ~8s with real
 material definition — walnut figure, brushed brass, travertine veining, linen weave —
@@ -253,7 +259,7 @@ def _free(prompt: str) -> Render:
     return _classify(response.content, "pollinations")
 
 
-PROVIDERS: list[Callable[[str], Render]] = [_gemini, _flux, _free]
+PROVIDERS: list[Callable[[str], Render]] = [_flux, _gemini, _free]
 
 
 def generate_render(prompt: str) -> Render:

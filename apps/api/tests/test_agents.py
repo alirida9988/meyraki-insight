@@ -252,3 +252,28 @@ def test_repair_carries_and_clamps_footprint():
     wire = WireLayout(scenarios=[_ws("a", ["lobby"], footprint=250.0)])
     move = repair_layout(wire, graph, [Objective.GUEST_FLOW]).scenarios[0].moves[0]
     assert move.footprint_pct == 100.0  # clamped, never rejected outright
+
+
+def test_agent_budgets_stay_within_the_sdks_non_streaming_limit():
+    """Raising a step's max_tokens too far makes the SDK refuse the request outright:
+    "Streaming is required for operations that may take longer than 10 minutes". That
+    breaks every call to that agent in production and is invisible here otherwise,
+    because the offline suite never contacts a model. Checked against the SDK's own
+    calculation, so it stays true if the SDK changes its threshold.
+    """
+    from anthropic import Anthropic
+
+    from app import agents
+
+    client = Anthropic(api_key="not-a-real-key")
+    budgets = {
+        agents.INTAKE_MODEL: 2048,
+        agents.ZONES_MODEL: agents.ZONES_MAX_TOKENS,
+        agents.LAYOUT_MODEL: 16000,
+        agents.MOODBOARD_MODEL: 4096,
+        agents.REPORT_MODEL: agents.REPORT_MAX_TOKENS,
+    }
+    for model, max_tokens in budgets.items():
+        client._calculate_nonstreaming_timeout(  # raises ValueError if too large
+            max_tokens, None
+        )

@@ -45,9 +45,12 @@ def test_one_hard_failure_fails_the_run_at_any_score(monkeypatch, capsys):
     assert golden_set.main() == 1
     out = capsys.readouterr().out
     assert "hard check(s) failed" in out
-    # 4 plans x 20 soft checks + 1 hard failure = 80/81 — comfortably above the
-    # threshold, and still a failing run. That is the whole point.
-    assert "80/81 = 98.8%" in out
+    # The score stays comfortably above the threshold and the run still fails — that is
+    # the whole point. Derived, not hardcoded: the fixture set grows.
+    import re
+
+    score = float(re.search(r"= (\d+\.\d)%", out).group(1))
+    assert score > golden_set.THRESHOLD * 100, f"score {score}% should have passed on its own"
 
 
 def test_soft_failures_are_governed_by_the_threshold(monkeypatch):

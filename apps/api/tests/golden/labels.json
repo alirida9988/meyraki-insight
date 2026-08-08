@@ -1,23 +1,48 @@
 {
   "cleo_hotel.png": {
     "quality": "ok",
-    "zone_count": [8, 15],
-    "required_categories": ["entrance", "lobby", "dining", "restroom"],
+    "zone_count": [
+      8,
+      15
+    ],
+    "required_categories": [
+      "entrance",
+      "lobby",
+      "dining",
+      "restroom"
+    ],
     "expect_entrance": true,
     "note": "Real plan. Captions are English plus one misspelled French word (RÉGÉPTION), and a demo heatmap is baked into the image. 'restroom' is the check that needs vision rather than caption transcription: the bathrooms are drawn as unlabelled fixtures. NOT a hold-out — this is also the E2E fixture, so it is the most overfit input in the repo."
   },
   "cafe_vector.pdf": {
     "quality": "ok",
-    "zone_count": [5, 12],
-    "required_categories": ["entrance", "dining", "kitchen", "bar", "restroom"],
+    "zone_count": [
+      5,
+      12
+    ],
+    "required_categories": [
+      "entrance",
+      "dining",
+      "kitchen",
+      "bar",
+      "restroom"
+    ],
     "expect_entrance": true,
     "expect_vector": true,
     "note": "Synthetic but measured: double-line walls, door swing arcs, furniture, scale bar, 1:100 title block. Generated from an explicit room model, so every caption is provably inside its own room."
   },
   "coworking_vector.pdf": {
     "quality": "ok",
-    "zone_count": [4, 10],
-    "required_categories": ["reception", "workspace", "meeting", "lounge"],
+    "zone_count": [
+      4,
+      10
+    ],
+    "required_categories": [
+      "reception",
+      "workspace",
+      "meeting",
+      "lounge"
+    ],
     "expect_entrance": true,
     "expect_vector": true,
     "note": "Second venue type. The exterior door is drawn on the reception's south wall, so expect_entrance is evidenced by the drawing rather than inferred."
@@ -28,5 +53,20 @@
     "required_categories": [],
     "expect_entrance": null,
     "note": "Bar chart. Intake must reject it AND say why in a sentence — accepting this is the product's worst failure mode, so both of its checks are hard."
+  },
+  "blackstone_hotel_1910.png": {
+    "quality": "ok",
+    "zone_count": [
+      8,
+      22
+    ],
+    "required_categories": [
+      "entrance",
+      "lounge",
+      "dining"
+    ],
+    "expect_entrance": true,
+    "note": "A REAL HOLD-OUT: the Blackstone Hotel, Chicago (Marshall & Fox, c.1910), public domain via Wikimedia Commons. Nothing about this product influenced it — unlike cleo_hotel.png, which is also the E2E fixture. Four floor plates on one sheet, which is normal architectural practice and which used to blow the Zone Analyst's token budget outright; the prompt now scopes to the ground/entrance plate. Period labels (Lounging Room, Buffet, Ball Room, Cigar Stand) test function-not-wording classification on vocabulary no modern plan uses. Allows more unclassified zones than the other plans, and the reason is a real product gap rather than a model failure: this sheet has retail concessions (Flower Shop, Shop, Barber Shop) and double-height voids (\"Upper Part of Ball Room\"), and ZoneCategory has no value for either — a hotel's retail tenants are a legitimate hospitality zone type with their own flow behaviour. `other` is the correct answer until the contract gains a category, so the threshold is set from what the drawing actually contains.",
+    "max_unclassified": 5
   }
 }

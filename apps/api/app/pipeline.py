@@ -148,6 +148,15 @@ def step_zones(ctx: Ctx) -> ZoneGraph:
 
         plan_bytes = ctx.upload_bytes(ctx.analysis.floorplan_upload_id)
         if plan_bytes is not None:
+            # A sheet carrying several floor plates is normal architectural practice and
+            # this product analyses one plate, so say which reading the client is getting
+            # rather than letting them assume the whole sheet was covered.
+            floors = (ctx.outputs.get("intake") or {}).get("floors_detected") or 1
+            if isinstance(floors, int) and floors > 1:
+                _emit(ctx.session, ctx.analysis.id, "step",
+                      f"zones: the sheet shows {floors} floor plates — analysing the "
+                      "ground/entrance plate only; upload one plate per analysis to "
+                      "cover the others")
             return agents.run_zones(plan_bytes)
     # Stub fallback: fixed demo zones.
     square = lambda x0, y0, x1, y1: [  # noqa: E731
