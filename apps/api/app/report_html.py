@@ -128,7 +128,7 @@ CATEGORY_LABELS = {
         "lounge": "Lounge", "dining": "Dining", "bar": "Bar", "kitchen": "Kitchen",
         "corridor": "Corridor", "stairs": "Stairs", "elevator": "Elevator",
         "restroom": "Restroom", "terrace": "Terrace", "workspace": "Workspace",
-        "meeting": "Meeting room", "storage": "Storage", "service": "Service",
+        "meeting": "Meeting room", "storage": "Storage", "service": "Service", "retail": "Retail",
         "other": "Unclassified",
     },
     "ar": {
@@ -136,7 +136,7 @@ CATEGORY_LABELS = {
         "lounge": "صالة جلوس", "dining": "مطعم", "bar": "بار", "kitchen": "مطبخ",
         "corridor": "ممر", "stairs": "سلالم", "elevator": "مصعد",
         "restroom": "دورة مياه", "terrace": "شرفة", "workspace": "مساحة عمل",
-        "meeting": "قاعة اجتماعات", "storage": "مخزن", "service": "خدمات",
+        "meeting": "قاعة اجتماعات", "storage": "مخزن", "service": "خدمات", "retail": "متجر",
         "other": "غير مصنّفة",
     },
 }

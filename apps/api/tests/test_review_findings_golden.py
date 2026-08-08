@@ -313,3 +313,42 @@ def test_moodboard_step_reports_providers_resolution_range_and_every_failure(mon
     assert "flux: 402 Payment Required" in note, "the actionable reason must not be truncated"
     assert "pollinations: 429" in note, "the last provider's reason must survive too"
     assert "DRAFT" in note
+
+
+# Retail category (2026-08-08) — added after a real hotel hold-out put a florist, a shop
+# and a barber into `other`, where they got a default attraction and a default floor share.
+
+def test_retail_is_a_real_category_everywhere_it_matters():
+    """A new ZoneCategory is only real once every consumer knows about it. Adding one to
+    the enum and nowhere else leaves it silently defaulted in the simulation and the
+    solver — which is the state retail was already in as `other`."""
+    from app import solver
+    from app.agents import HERO_SHOT_ZONES
+    from app.pedestrian import ATTRACTION
+    from meyraki_contracts import SCORE_EXCLUDED, ZoneCategory
+
+    assert ZoneCategory.RETAIL in ATTRACTION, "no guest attraction — the flow sim defaults it"
+    assert ZoneCategory.RETAIL in solver.USABLE_SHARE, "no usable share — the solver defaults it"
+    assert ZoneCategory.RETAIL not in SCORE_EXCLUDED, "guests shop; it counts toward the score"
+    assert ZoneCategory.RETAIL in HERO_SHOT_ZONES, "a hotel boutique is a legitimate hero shot"
+    for lang in ("en", "ar"):
+        assert "retail" in report_html.CATEGORY_LABELS[lang]
+    assert "retail" in agents_zones_prompt(), "the analyst cannot use a category it is not told about"
+
+
+def agents_zones_prompt() -> str:
+    from app.agents import ZONES_PROMPT
+
+    return ZONES_PROMPT
+
+
+def test_a_shop_is_priced_and_weighted_between_a_corridor_and_a_destination():
+    """Sanity on the numbers, not just their presence: a guest browses a boutique more
+    than they linger in a corridor, and less than they commit to a restaurant."""
+    from app import solver
+    from app.pedestrian import ATTRACTION
+    from meyraki_contracts import ZoneCategory
+
+    assert ATTRACTION[ZoneCategory.CORRIDOR] < ATTRACTION[ZoneCategory.RETAIL] < ATTRACTION[ZoneCategory.DINING]
+    # densely fitted with display units, so less free floor than an open lounge
+    assert solver.USABLE_SHARE[ZoneCategory.RETAIL] < solver.USABLE_SHARE[ZoneCategory.LOUNGE]

@@ -63,10 +63,11 @@
     "required_categories": [
       "entrance",
       "lounge",
-      "dining"
+      "dining",
+      "retail"
     ],
     "expect_entrance": true,
-    "note": "A REAL HOLD-OUT: the Blackstone Hotel, Chicago (Marshall & Fox, c.1910), public domain via Wikimedia Commons. Nothing about this product influenced it — unlike cleo_hotel.png, which is also the E2E fixture. Four floor plates on one sheet, which is normal architectural practice and which used to blow the Zone Analyst's token budget outright; the prompt now scopes to the ground/entrance plate. Period labels (Lounging Room, Buffet, Ball Room, Cigar Stand) test function-not-wording classification on vocabulary no modern plan uses. Allows more unclassified zones than the other plans, and the reason is a real product gap rather than a model failure: this sheet has retail concessions (Flower Shop, Shop, Barber Shop) and double-height voids (\"Upper Part of Ball Room\"), and ZoneCategory has no value for either — a hotel's retail tenants are a legitimate hospitality zone type with their own flow behaviour. `other` is the correct answer until the contract gains a category, so the threshold is set from what the drawing actually contains.",
-    "max_unclassified": 5
+    "note": "A REAL HOLD-OUT: the Blackstone Hotel, Chicago (Marshall & Fox, c.1910), public domain via Wikimedia Commons. Nothing about this product influenced it — unlike cleo_hotel.png, which is also the E2E fixture. Four floor plates on one sheet, which is normal architectural practice and which used to blow the Zone Analyst's token budget outright; the prompt now scopes to the ground/entrance plate. Period labels (Lounging Room, Buffet, Ball Room, Cigar Stand) test function-not-wording classification on vocabulary no modern plan uses. Its retail concessions (Flower Shop, Shop, Barber Shop) are why ZoneCategory gained a `retail` value on 2026-08-08 — they had been landing in `other`, taking a default attraction in the flow simulation and a default floor share in the solver. This plan now REQUIRES retail, which is the check that would catch the category being dropped or the analyst forgetting it exists. A small allowance remains for the double-height voids (\"Upper Part of…\"), which genuinely are not floor zones.",
+    "max_unclassified": 3
   }
 }

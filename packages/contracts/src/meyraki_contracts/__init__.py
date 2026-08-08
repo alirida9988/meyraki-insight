@@ -48,6 +48,10 @@ class ZoneCategory(StrEnum):
     MEETING = "meeting"
     STORAGE = "storage"
     SERVICE = "service"
+    RETAIL = "retail"
+    """A concession inside the venue — gift shop, florist, barber, spa boutique. Added
+    2026-08-08 after a real hotel plan put three of them in `other`: they are revenue
+    tenants with their own dwell behaviour, not unclassifiable space."""
     OTHER = "other"
 
 

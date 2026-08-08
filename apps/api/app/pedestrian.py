@@ -30,6 +30,7 @@ ATTRACTION = {
     ZoneCategory.BAR: 4.0,
     ZoneCategory.RECEPTION: 3.5,
     ZoneCategory.LOBBY: 3.0,
+    ZoneCategory.RETAIL: 2.5,
     ZoneCategory.WORKSPACE: 2.5,
     ZoneCategory.MEETING: 2.0,
     ZoneCategory.TERRACE: 2.0,
