@@ -52,6 +52,13 @@ class ZoneCategory(StrEnum):
     """A concession inside the venue — gift shop, florist, barber, spa boutique. Added
     2026-08-08 after a real hotel plan put three of them in `other`: they are revenue
     tenants with their own dwell behaviour, not unclassifiable space."""
+    GUESTROOM = "guestroom"
+    """A let bedroom or suite. Added 2026-08-08: `hotel` is the product's flagship space
+    type and a guest floor is mostly guest rooms, yet there was no category for one, so
+    every room fell to `other` and drew the default attraction of 1.0 against dining's
+    5.0 — the simulation routed guests away from the single largest destination on the
+    floor. Same failure as the café that was typed `other`, except no prompt could fix
+    it, because the right answer did not exist in the taxonomy."""
     OTHER = "other"
 
 
@@ -68,7 +75,14 @@ UTILITY_ZONES: frozenset[ZoneCategory] = frozenset(
 """Guests do go here, but traffic through a lavatory or a lift core is not a measure
 of how well the space performs, so these sit outside the flow-efficiency score."""
 
-SCORE_EXCLUDED: frozenset[ZoneCategory] = BACK_OF_HOUSE | UTILITY_ZONES
+PRIVATE_DESTINATIONS: frozenset[ZoneCategory] = frozenset({ZoneCategory.GUESTROOM})
+"""Guest-facing, but let to one party and entered only by them. A guest room is a
+destination the simulation must route to — it is the point of a hotel floor — yet how
+heavily it is occupied says nothing about whether the space is well laid out, and on a
+guest floor it would dominate the score by area and drown out the circulation it is
+supposed to measure. So it attracts guests fully and scores not at all."""
+
+SCORE_EXCLUDED: frozenset[ZoneCategory] = BACK_OF_HOUSE | UTILITY_ZONES | PRIVATE_DESTINATIONS
 """Excluded from the Flow Efficiency Score. Named in the report's assumptions."""
 
 

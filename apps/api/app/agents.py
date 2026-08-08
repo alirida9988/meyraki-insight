@@ -209,8 +209,10 @@ Rules:
   by its evident function (furniture, fixtures).
 - Classify by function, not by wording: a café/restaurant/breakfast room is dining,
   a beverage counter is bar, an office or desk area is workspace, and a shop, boutique,
-  florist, barber or newsstand inside the venue is retail. Use "other" only when the
-  function genuinely cannot be determined.
+  florist, barber or newsstand inside the venue is retail. A let bedroom or suite is
+  guestroom — a hotel room, a suite, a bedroom with an ensuite off a corridor of like
+  rooms; its private bathroom is part of the guestroom, not a separate restroom. Use
+  "other" only when the function genuinely cannot be determined.
 - adjacency lists pairs of zones connected by a door or open passage.
 - entrances lists zones with a door to the outside of the building.
 - Cover the full walkable floor area; skip wall voids and shafts.

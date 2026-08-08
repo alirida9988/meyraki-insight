@@ -357,12 +357,24 @@ def step_business(ctx: Ctx) -> BusinessCase:
         ),
     ]
     if score is None:
+        # A hotel guest floor reaches here legitimately: guest rooms are excluded from
+        # the score by design, so a floor that is only rooms and a corridor can leave
+        # nothing to measure. Telling that client "no guest-facing zone" would be plainly
+        # false — they are looking at a floor full of guest rooms — so the note names the
+        # reason it actually applies.
+        rooms = sum(1 for z in graph.zones if z.category is ZoneCategory.GUESTROOM)
+        reason = (
+            f"every scored zone is excluded — this plate is {rooms} guest "
+            "room(s) plus circulation, and guest rooms are private destinations that "
+            "do not evidence circulation quality"
+            if rooms
+            else "every zone is back-of-house or utility"
+        )
         _emit(
             ctx.session,
             ctx.analysis.id,
             "step",
-            "Flow Efficiency Score not computed: this plan has no guest-facing zone "
-            "with measurable traffic (every zone is back-of-house or utility).",
+            f"Flow Efficiency Score not computed: {reason}.",
         )
     return BusinessCase(flow_efficiency_score=score, assumptions=assumptions)
 

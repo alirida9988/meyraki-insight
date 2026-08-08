@@ -129,6 +129,7 @@ CATEGORY_LABELS = {
         "corridor": "Corridor", "stairs": "Stairs", "elevator": "Elevator",
         "restroom": "Restroom", "terrace": "Terrace", "workspace": "Workspace",
         "meeting": "Meeting room", "storage": "Storage", "service": "Service", "retail": "Retail",
+        "guestroom": "Guest room",
         "other": "Unclassified",
     },
     "ar": {
@@ -137,6 +138,7 @@ CATEGORY_LABELS = {
         "corridor": "ممر", "stairs": "سلالم", "elevator": "مصعد",
         "restroom": "دورة مياه", "terrace": "شرفة", "workspace": "مساحة عمل",
         "meeting": "قاعة اجتماعات", "storage": "مخزن", "service": "خدمات", "retail": "متجر",
+        "guestroom": "غرفة نزلاء",
         "other": "غير مصنّفة",
     },
 }

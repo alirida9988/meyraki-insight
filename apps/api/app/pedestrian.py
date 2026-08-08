@@ -25,6 +25,7 @@ SAMPLE_EVERY = 10         # iterations between position samples
 
 # How strongly each zone type attracts a guest heading somewhere.
 ATTRACTION = {
+    ZoneCategory.GUESTROOM: 5.0,  # on a guest floor this is where nearly everyone is going
     ZoneCategory.DINING: 5.0,
     ZoneCategory.LOUNGE: 4.0,
     ZoneCategory.BAR: 4.0,
