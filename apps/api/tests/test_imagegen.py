@@ -132,11 +132,13 @@ def test_flux_counts_as_final_quality_and_needs_no_cooldown():
     assert Render(JPG, ".jpg", provider, (512, 512)).is_draft
 
 
-def test_flux_is_tried_before_the_free_tier(monkeypatch):
-    """Order matters: the free tier is the last resort, not the second choice."""
+def test_flux_leads_the_chain_and_the_free_tier_is_last(monkeypatch):
+    """FLUX is primary on measured evidence: $0.025/MP against Gemini's $0.039/image, and
+    every render this product has shipped came from it — Gemini has answered 429 on every
+    attempt, so its quality here is unmeasured. The free tier stays the last resort."""
     names = [p.__name__ for p in imagegen.PROVIDERS]
-    assert names.index("_flux") < names.index("_free")
-    assert names.index("_gemini") < names.index("_flux")
+    assert names.index("_flux") < names.index("_gemini"), "the proven, cheaper provider leads"
+    assert names.index("_gemini") < names.index("_free"), "the free draft tier is last"
 
 
 def test_flux_reports_a_missing_image_url_instead_of_crashing(monkeypatch):

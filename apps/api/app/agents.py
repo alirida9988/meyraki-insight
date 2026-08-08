@@ -213,13 +213,27 @@ Rules:
 - adjacency lists pairs of zones connected by a door or open passage.
 - entrances lists zones with a door to the outside of the building.
 - Cover the full walkable floor area; skip wall voids and shafts.
+- If the sheet shows SEVERAL floor plates side by side (a typical-floor plan, a
+  mezzanine, a basement, a ground floor...), map ONE plate only: the ground or entrance
+  level if it is present, otherwise the largest. Everything downstream — the heatmap,
+  the flow simulation, the layout solver — describes a single floor plate, so zones
+  traced across four stacked plans are meaningless whichever way they are drawn.
 - confidence: your certainty for that zone in [0,1]."""
+
+
+# 16000, not higher: the SDK refuses a non-streaming request whose max_tokens implies a
+# generation longer than ten minutes, so 24000 raised ValueError on EVERY zones call —
+# a production-only break, invisible to a suite that never contacts a model.
+# test_agent_budgets_stay_within_the_sdks_non_streaming_limit guards it offline.
+# A multi-plate architect's sheet is handled by scoping the prompt to one floor plate,
+# which is the real fix; more tokens would only have bought a meaningless answer.
+ZONES_MAX_TOKENS = 16000
 
 
 def run_zones(plan_bytes: bytes) -> ZoneGraph:
     wire: WireZoneGraph = _parse(
         ZONES_MODEL,
-        16000,
+        ZONES_MAX_TOKENS,
         [_plan_block(plan_bytes), {"type": "text", "text": ZONES_PROMPT}],
         WireZoneGraph,
         step="zones",

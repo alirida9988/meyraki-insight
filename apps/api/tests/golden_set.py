@@ -110,10 +110,14 @@ def score_plan(name: str, spec: dict) -> tuple[list[Check], dict]:
         )
     # Without this, the whole set is satisfiable by transcribing the words printed on
     # the drawing — a benchmark that cannot tell classification from OCR.
+    # A plan may legitimately contain rooms our contract has no category for — a 1910
+    # hotel's retail concessions and double-height voids, for instance — so the
+    # allowance comes from the drawing, defaulting to a fifth of its zones.
+    allowed = spec.get("max_unclassified", max(1, len(graph.zones) // 5))
     checks.append((
         f"{name}: the model actually classified the rooms",
-        unclassified <= max(1, len(graph.zones) // 5),
-        f"{unclassified} of {len(graph.zones)} left as 'other'",
+        unclassified <= allowed,
+        f"{unclassified} of {len(graph.zones)} left as 'other' (allowed {allowed})",
         HARD,
     ))
     if spec.get("expect_entrance") is not None:
