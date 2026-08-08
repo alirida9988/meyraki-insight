@@ -156,6 +156,31 @@ test("full analysis: upload → agents → heatmap, scenarios, moodboard, score"
   await expect(page.getByTestId("flow-score")).toBeVisible();
   await expect(page.getByAltText(/guest-flow heatmap/i)).toBeVisible();
   await expect(page.getByTestId("report-download")).toBeVisible();
+
+  // A studio sends the report to a client who has no account. The link must work with
+  // no session at all — which is exactly why it expires and why a forged one must not.
+  await page.getByTestId("share-report").click();
+  // Surface the server's own reason instead of a bare 20s timeout: without
+  // MEYRAKI_SHARE_SECRET the API disables sharing on purpose, and a run that hits that
+  // should say so rather than look like a broken button.
+  const shared = page.getByTestId("share-link");
+  const shareError = page.getByTestId("share-error");
+  await expect(shared.or(shareError)).toBeVisible({ timeout: 20_000 });
+  if (await shareError.isVisible()) {
+    throw new Error(`sharing did not work: ${await shareError.textContent()}`);
+  }
+  const link = (await shared.textContent())?.match(/https?:\/\/\S+/)?.[0];
+  expect(link, "the share link should be shown even when the clipboard is unavailable").toBeTruthy();
+
+  // Fetch it from a context with no cookies — a different browser, effectively.
+  const anonymous = await page.context().browser()!.newContext();
+  const asClient = await anonymous.request.get(link!);
+  expect(asClient.status()).toBe(200);
+  expect((await asClient.body()).subarray(0, 5).toString()).toBe("%PDF-");
+
+  const forged = await anonymous.request.get(link!.replace("sig=", "sig=0"));
+  expect(forged.status(), "a tampered signature must not open the report").toBe(404);
+  await anonymous.close();
 });
 
 test("PDF floorplan: full analysis with a rendered heatmap", async ({ page }) => {

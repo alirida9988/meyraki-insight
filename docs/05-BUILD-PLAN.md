@@ -63,7 +63,7 @@ Implement the 7-step agent pipeline (`01-ARCHITECTURE.md` §2) in order:
   billed once, not twice), poison inputs (`tests/qa_hunt.py`), provider outage (the render
   chain fails over FLUX → Gemini → free tier, captioning the result honestly), cost
   ceilings enforced (`app/costs.py`).
-- Security pass: signed URLs, org isolation tests, upload sanitization, rate limits.
+- Security pass ✅ — signed URLs (`app/sharing.py`: HMAC over analysis id AND expiry, clamped TTL, constant-time compare, fails closed with no secret, and every bad link returns the same 404 as an unknown analysis so the endpoint is not an existence oracle), org isolation tests, upload sanitization, rate limits.
 - Run 3–5 real pilot projects (Cleo-class); collect founder feedback; tune prompts
   against the golden set.
 - **Exit:** pilot-ready product ✅ + demo script ✅ `artifacts/demo-script.md`.

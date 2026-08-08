@@ -54,6 +54,7 @@ non-local environment:
 
 | Variable | Value | Why |
 |---|---|---|
+| `MEYRAKI_SHARE_SECRET` | long random string | Signs the expiring links a studio sends to a client who has no account. **Unset means sharing is off** — deliberately, because a predictable signing key is worse than no sharing. Rotating it invalidates every link already sent. |
 | `MEYRAKI_HTTPS` | `1` | Adds `Secure` to the session cookie. A TLS-terminating proxy does **not** add it for you. |
 | `HUGGINGFACE_API_TOKEN` | `hf_…` | Routes moodboard renders to FLUX.1-Krea-dev — **final**, client-presentable quality (~$0.025/render, so ~$0.075 per report). Without it renders fall to the free tier, which is captioned as draft in the client report. A free HF account's included credit runs out after a handful of images; top up pre-paid credits or subscribe to PRO. |
 | `MEYRAKI_FLUX_MODEL` | `fal-ai/flux/krea` | Which FLUX model serves renders. Drop to `fal-ai/flux/schnell` ($0.003/MP instead of $0.025) when volume matters more than fidelity. |
