@@ -228,6 +228,10 @@ jobs:
         # deliberately public binding.
         run: |
           docker compose config --quiet
+          # Sharing is deliberately disabled if its signing secret is absent. It must
+          # reach the API container when an operator configures it in .env; otherwise
+          # the UI ships a "Copy client link" button that always returns 503.
+          docker compose config | grep -q 'MEYRAKI_SHARE_SECRET: ci-share-secret'
           published=$(docker compose config | grep -c 'published:' || true)
           loopback=$(docker compose config | grep -c 'host_ip: 127\.0\.0\.1' || true)
           echo "$published published port(s), $loopback bound to loopback"
@@ -239,6 +243,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-not-a-real-password
           ANTHROPIC_API_KEY: sk-ant-ci-not-a-real-key
+          MEYRAKI_SHARE_SECRET: ci-share-secret
 
 # NOT run here, by design:
 #   apps/web/e2e (Playwright)  — needs the live stack + paid model calls

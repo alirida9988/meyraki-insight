@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -84,6 +84,9 @@ class Analysis(Base):
     report_language: Mapped[str] = mapped_column(String(2), default="en")  # "en" | "ar"
     floorplan_upload_id: Mapped[str] = mapped_column(String(32))
     footfall_upload_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    # A stable hash of the requested inputs.  It lets the database reject a duplicate
+    # active run while still allowing a studio to deliberately re-run an analysis later.
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     """Bumped by the runner per step; a 'running' row with a stale heartbeat is a crashed
@@ -94,6 +97,19 @@ class Analysis(Base):
     steps: Mapped[list["StepRun"]] = relationship(
         back_populates="analysis", order_by="StepRun.position"
     )
+
+
+# UI disabling is useful feedback, not a data-integrity boundary: retries, double-clicks,
+# and another tab can all reach the API.  Enforce one identical queued/running run per
+# project in the database so duplicate requests cannot duplicate model spend.
+Index(
+    "uq_analyses_active_fingerprint",
+    Analysis.project_id,
+    Analysis.request_fingerprint,
+    unique=True,
+    sqlite_where=Analysis.status.in_(("queued", "running")),
+    postgresql_where=Analysis.status.in_(("queued", "running")),
+)
 
 
 class StepRun(Base):

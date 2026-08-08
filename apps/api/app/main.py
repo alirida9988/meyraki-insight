@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schemas
 
 from . import auth as auth_mod
+from . import sharing
 from . import footfall, ratelimit, settings, storage
 from .db import SessionLocal, get_session, init_db
 from .models import Analysis, CostEntry, Event, Org, Project, StepRun, Upload, User
@@ -277,6 +279,21 @@ class AnalysisIn(BaseModel):
     report_language: Literal["en", "ar"] = "en"
 
 
+def _analysis_fingerprint(project_id: str, body: AnalysisIn) -> str:
+    """Canonical request identity used to make an in-flight analysis idempotent."""
+    payload = {
+        "project_id": project_id,
+        "floorplan_upload_id": body.floorplan_upload_id,
+        "footfall_upload_id": body.footfall_upload_id,
+        "objectives": sorted(objective.value for objective in body.objectives),
+        "brief": body.brief,
+        "report_language": body.report_language,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def _run_in_background(analysis_id: str) -> None:
     # ponytail: in-process execution; becomes a worker pool when the real agents land (M2)
     with SessionLocal() as session:
@@ -304,6 +321,21 @@ def start_analysis(
                 422, "That footfall file doesn't belong to this project — upload it here first."
             )
 
+    fingerprint = _analysis_fingerprint(project_id, body)
+    # Fast path for a repeat request.  The unique partial index below is still the
+    # authority: this read cannot make two concurrent requests safe on its own.
+    active = session.scalar(
+        select(Analysis)
+        .where(
+            Analysis.project_id == project_id,
+            Analysis.request_fingerprint == fingerprint,
+            Analysis.status.in_(("queued", "running")),
+        )
+        .limit(1)
+    )
+    if active is not None:
+        return {"id": active.id, "status": active.status}
+
     analysis = Analysis(
         project_id=project_id,
         objectives=[o.value for o in body.objectives],
@@ -311,12 +343,31 @@ def start_analysis(
         report_language=body.report_language,
         floorplan_upload_id=body.floorplan_upload_id,
         footfall_upload_id=body.footfall_upload_id,
+        request_fingerprint=fingerprint,
     )
     session.add(analysis)
     session.flush()
     for i, name in enumerate(STEP_NAMES):
         session.add(StepRun(analysis_id=analysis.id, position=i, name=name))
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # A concurrent request won the partial unique index.  Return that run rather
+        # than launching another model bill; only hide the collision when it is the
+        # exact active request we were trying to create.
+        session.rollback()
+        active = session.scalar(
+            select(Analysis)
+            .where(
+                Analysis.project_id == project_id,
+                Analysis.request_fingerprint == fingerprint,
+                Analysis.status.in_(("queued", "running")),
+            )
+            .limit(1)
+        )
+        if active is not None:
+            return {"id": active.id, "status": active.status}
+        raise
 
     tasks.add_task(_run_in_background, analysis.id)
     return {"id": analysis.id, "status": analysis.status}
@@ -419,6 +470,64 @@ def resume_analysis(
     session.commit()
     tasks.add_task(_run_in_background, analysis.id)
     return {"id": analysis.id, "status": "queued"}
+
+
+@app.post("/analyses/{analysis_id}/share")
+def share_report(
+    analysis_id: str,
+    request: Request,
+    ttl_days: int = 7,
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> dict:
+    """Mint an expiring link a studio can send to a client who has no account.
+
+    Org-scoped like everything else: you can only share an analysis you own. The link
+    itself carries no session and grants nothing beyond this one report.
+    """
+    analysis = _own_analysis(session, user, analysis_id)
+    report_step = next((s for s in analysis.steps if s.name == "report"), None)
+    if not (report_step and (report_step.output or {}).get("report_key")):
+        raise HTTPException(404, "Report not ready for this analysis")
+    try:
+        signature, expires_at = sharing.mint(analysis_id, ttl_days * 24 * 3600)
+    except sharing.SharingDisabled as exc:
+        raise HTTPException(503, str(exc)) from exc
+    path = f"/shared/reports/{analysis_id}?expires={expires_at}&sig={signature}"
+    return {"url": str(request.base_url).rstrip("/") + path, "expires_at": expires_at}
+
+
+@app.get("/shared/reports/{analysis_id}")
+def shared_report(
+    analysis_id: str,
+    expires: int = 0,
+    sig: str = "",
+    session: Session = Depends(get_session),
+) -> Response:
+    """Serve a report to whoever holds a valid link. No session, by design.
+
+    Every failure returns the same 404 as an unknown analysis: an expired link, a forged
+    signature and a nonexistent id must be indistinguishable, or the endpoint becomes an
+    oracle for which analyses exist.
+    """
+    if not sharing.verify(analysis_id, expires, sig):
+        raise HTTPException(404, "This link is not valid or has expired")
+    analysis = session.get(Analysis, analysis_id)
+    report_step = (
+        next((s for s in analysis.steps if s.name == "report"), None) if analysis else None
+    )
+    key = (report_step.output or {}).get("report_key") if report_step else None
+    if not key:
+        raise HTTPException(404, "This link is not valid or has expired")
+    try:
+        content = storage.load(key)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "This link is not valid or has expired") from exc
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="meyraki-report-{analysis_id[:8]}.pdf"'},
+    )
 
 
 @app.get("/analyses/{analysis_id}/report.pdf")

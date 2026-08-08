@@ -49,6 +49,10 @@ services:
       MEYRAKI_TRUST_PROXY: ${MEYRAKI_TRUST_PROXY:-0}
       MEYRAKI_ANALYSIS_BUDGET_USD: ${MEYRAKI_ANALYSIS_BUDGET_USD:-1.50}
       MEYRAKI_FLUX_MODEL: ${MEYRAKI_FLUX_MODEL:-fal-ai/flux/krea}
+      # The signed client-report links deliberately fail closed without this value.
+      # Pass it through explicitly: Compose does not expose variables from .env to a
+      # container unless they are listed here.
+      MEYRAKI_SHARE_SECRET: ${MEYRAKI_SHARE_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
       HUGGINGFACE_API_TOKEN: ${HUGGINGFACE_API_TOKEN:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

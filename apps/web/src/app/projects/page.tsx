@@ -121,6 +121,10 @@ export default function ProjectsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [heatmapKey, setHeatmapKey] = useState<string | null>(null);
   const [results, setResults] = useState<Results | null>(null);
+  const [shareState, setShareState] = useState<{
+    status: "idle" | "working" | "ready" | "error";
+    message: string;
+  }>({ status: "idle", message: "" });
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [history, setHistory] = useState<AnalysisSummary[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -186,6 +190,35 @@ export default function ProjectsPage() {
       return detail.status as string;
     } catch {
       return null; // transient — the stream, the poll, or a retry will resync
+    }
+  }
+
+  async function shareReport(analysisId: string) {
+    setShareState({ status: "working", message: "" });
+    try {
+      const r = await apiFetch(`/analyses/${analysisId}/share`, { method: "POST" });
+      if (!r.ok) {
+        // 503 means the server has no signing secret configured — say that rather than
+        // "something went wrong", because it is an operator fix, not a user one.
+        const detail = await r.json().catch(() => ({}));
+        setShareState({
+          status: "error",
+          message: detail?.detail ?? `Could not create a link (HTTP ${r.status})`,
+        });
+        return;
+      }
+      const { url, expires_at } = await r.json();
+      const expires = new Date(expires_at * 1000).toLocaleDateString();
+      // The clipboard needs a user gesture and a secure context; over plain HTTP or in a
+      // browser that refuses, the link is still shown so it can be copied by hand.
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareState({ status: "ready", message: `Copied — expires ${expires}. ${url}` });
+      } catch {
+        setShareState({ status: "ready", message: `Expires ${expires}. ${url}` });
+      }
+    } catch {
+      setShareState({ status: "error", message: "Could not reach the server." });
     }
   }
 
@@ -689,6 +722,35 @@ export default function ProjectsPage() {
                 >
                   Download insight report (PDF)
                 </a>
+              )}
+
+              {results?.reportReady && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    data-testid="share-report"
+                    onClick={() => void shareReport(results.analysisId)}
+                    className="min-h-10 rounded-sheet border border-hairline px-5 py-2.5 text-[14px] transition-colors hover:border-viridian"
+                  >
+                    {shareState.status === "working" ? "Creating link…" : "Copy client link"}
+                  </button>
+                  {shareState.status === "ready" && (
+                    <p
+                      data-testid="share-link"
+                      className="mt-2 break-all font-mono text-[11px] text-graphite"
+                    >
+                      {shareState.message}
+                    </p>
+                  )}
+                  {shareState.status === "error" && (
+                    <p
+                      data-testid="share-error"
+                      className="mt-2 font-mono text-[11px] text-thermal"
+                    >
+                      {shareState.message}
+                    </p>
+                  )}
+                </div>
               )}
 
               {results?.moodboard && (

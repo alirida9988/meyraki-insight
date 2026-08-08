@@ -148,6 +148,30 @@ def test_runner_claim_prevents_double_execution(client, project_id):
     assert after == before
 
 
+# Finding #7: a fast double-click/retry must reuse the active analysis rather than
+# launching and billing two identical pipelines.  The DB index also covers two tabs.
+def test_duplicate_analysis_submission_reuses_the_active_run(client, project_id, monkeypatch):
+    import app.main as main
+
+    monkeypatch.setattr(main, "_run_in_background", lambda _analysis_id: None)
+    plan = client.post(
+        f"/projects/{project_id}/uploads",
+        params={"kind": "floorplan"},
+        files={"file": ("double-click.png", PNG, "image/png")},
+    ).json()
+    payload = {"floorplan_upload_id": plan["id"], "objectives": ["guest_flow"]}
+
+    first = client.post(f"/projects/{project_id}/analyses", json=payload)
+    second = client.post(f"/projects/{project_id}/analyses", json=payload)
+    assert first.status_code == second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert first.json()["status"] == second.json()["status"] == "queued"
+
+    with SessionLocal() as s:
+        assert s.query(Analysis).filter_by(project_id=project_id).count() >= 1
+        assert s.query(Analysis).filter_by(id=first.json()["id"]).count() == 1
+
+
 # Finding #6: report step must output a ReportArtifact, not a QAVerdict
 def test_report_step_outputs_report_artifact(client, project_id):
     aid = _analysis(client, project_id)
