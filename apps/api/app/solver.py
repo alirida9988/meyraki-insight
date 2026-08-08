@@ -28,6 +28,7 @@ USABLE_SHARE = {
     ZoneCategory.BAR: 0.70,
     ZoneCategory.RETAIL: 0.60,   # display units and shelving, densely fitted
     ZoneCategory.LOBBY: 0.60,
+    ZoneCategory.GUESTROOM: 0.50,  # bed, wardrobe and ensuite leave little open floor
 }
 DEFAULT_USABLE_SHARE = 0.65
 SCALE = 10_000  # integer area units per unit-square plan
