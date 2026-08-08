@@ -6,6 +6,7 @@ enforced and nothing recorded actual spend, so these tests exist to keep that ho
 """
 
 import threading
+from datetime import datetime, timezone
 
 import pytest
 
@@ -486,3 +487,58 @@ def test_a_check_inside_a_step_uses_the_analysis_ceiling_not_the_module_default(
             costs.check_budget("layout", costs.current_budget_usd())
     finally:
         costs.stop_ledger(token)
+
+
+def test_a_resumed_run_does_not_pay_twice_for_finished_steps(client, project_id, monkeypatch):
+    """M5's "kill workers mid-run (must resume)" drill, at the layer that proves it.
+
+    A status of `done` after a resume says nothing about whether the expensive steps ran
+    again — the receipt does. Verified live against the containers first (SIGKILL during
+    the layout step, then resume): intake billed once, zones billed once. This pins it.
+    """
+    from app import pipeline
+
+    aid = _start_analysis(client, project_id)
+    for _ in range(60):
+        detail = client.get(f"/analyses/{aid}").json()
+        if detail["status"] in ("done", "failed", "rejected"):
+            break
+        import time as _time
+
+        _time.sleep(0.1)
+    assert detail["status"] == "done"
+
+    # Every step has output. Book spend against them as a completed run would have.
+    with SessionLocal() as s:
+        for step in ("intake", "zones"):
+            s.add(CostEntry(analysis_id=aid, step=step, model="claude-sonnet-5",
+                            input_tokens=1000, output_tokens=1000, usd=0.018))
+        analysis = s.get(Analysis, aid)
+        # Crash shape: still running, worker long dead, later steps never finished.
+        analysis.status = "running"
+        analysis.heartbeat_at = datetime.now(timezone.utc) - pipeline.STALE_AFTER * 2
+        for st in analysis.steps:
+            if st.name in ("report", "qa"):
+                st.status = "pending"
+                st.output = None
+        s.commit()
+
+    ran: list[str] = []
+    real_steps = dict(pipeline.STEPS)
+
+    def watched(name):
+        def step(ctx):
+            ran.append(name)
+            return real_steps[name](ctx)
+        return step
+
+    for name in ("intake", "zones", "report"):
+        monkeypatch.setitem(pipeline.STEPS, name, watched(name))
+
+    with SessionLocal() as s:
+        pipeline.run_analysis(s, aid)
+
+    assert "report" in ran, "the unfinished step must run"
+    assert "intake" not in ran and "zones" not in ran, (
+        "a resumed run re-executed a finished step — that is real money spent twice"
+    )

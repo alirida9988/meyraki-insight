@@ -337,10 +337,16 @@ def step_business(ctx: Ctx) -> BusinessCase:
             source="deterministic",
         ),
         Assumption(
+            # Taken from the flow step's own note rather than restated here. This
+            # assumption used to hardcode "distance decay from entrances", which stopped
+            # being true when JuPedSim became the simulated track — so a client reading
+            # their report was told the wrong method, and distance decay is now only the
+            # fallback the note names explicitly when it is used.
             statement=(
                 "Intensities are measured from uploaded footfall data."
                 if flow.track == Track.DATA_DRIVEN
-                else "Intensities are simulated (distance decay from entrances) — upload footfall data for measured values."
+                else (flow.notes[0] if flow.notes else "Intensities are simulated.")
+                + " Upload footfall data for measured values."
             ),
             source="pipeline",
         ),

@@ -352,3 +352,66 @@ def test_a_shop_is_priced_and_weighted_between_a_corridor_and_a_destination():
     assert ATTRACTION[ZoneCategory.CORRIDOR] < ATTRACTION[ZoneCategory.RETAIL] < ATTRACTION[ZoneCategory.DINING]
     # densely fitted with display units, so less free floor than an open lounge
     assert solver.USABLE_SHARE[ZoneCategory.RETAIL] < solver.USABLE_SHARE[ZoneCategory.LOUNGE]
+
+
+def test_the_report_states_the_method_that_actually_ran():
+    """The assumptions block told clients their numbers came from "distance decay from
+    entrances" long after JuPedSim became the simulated track — a false statement about
+    method in a document a client pays for. It now quotes the flow step's own note, so it
+    cannot drift from what happened again, including when the fallback really is used."""
+    import json as _json
+
+    from app import flow as flow_mod
+    from app import pedestrian
+
+    graph = ZoneGraph(
+        zones=[_sq("entrance", ZoneCategory.ENTRANCE, 0.0, 0.75, 0.3, 1.0),
+               _sq("lobby", ZoneCategory.LOBBY, 0.0, 0.3, 0.55, 0.75),
+               _sq("cafe", ZoneCategory.DINING, 0.55, 0.3, 1.0, 0.8)],
+        adjacency=[("entrance", "lobby"), ("lobby", "cafe")], entrances=["entrance"],
+    )
+
+    def method_for(report) -> str:
+        class _Ctx:
+            outputs = {"zones": graph.model_dump(), "flow": _json.loads(report.model_dump_json())}
+            session = None
+            analysis = None
+
+        return next(a.statement for a in step_business(_Ctx()).assumptions
+                    if a.source == "pipeline")
+
+    simulated = method_for(flow_mod.simulated(graph))
+    assert "JuPedSim" in simulated, f"the real engine must be named: {simulated}"
+    assert "distance decay from entrances" not in simulated
+
+    measured = method_for(flow_mod.data_driven(
+        graph, b"zone_name,timestamp,traffic_count\nLobby,2026-01-01 08:00,120\n"))
+    assert "measured from uploaded footfall" in measured
+    assert "JuPedSim" not in measured, "a measured run must not claim a simulation"
+
+
+def test_the_report_says_distance_decay_only_when_distance_decay_actually_ran(monkeypatch):
+    """The fallback is legitimate; silently describing it as a simulation would not be."""
+    import json as _json
+
+    from app import flow as flow_mod
+    from app import pedestrian
+
+    graph = ZoneGraph(
+        zones=[_sq("entrance", ZoneCategory.ENTRANCE, 0.0, 0.75, 0.3, 1.0),
+               _sq("lobby", ZoneCategory.LOBBY, 0.0, 0.3, 0.55, 0.75)],
+        adjacency=[("entrance", "lobby")], entrances=["entrance"],
+    )
+    monkeypatch.setattr(pedestrian, "simulate",
+                        lambda g: (None, [], "the simulation engine is unavailable"))
+
+    class _Ctx:
+        outputs = {"zones": graph.model_dump(),
+                   "flow": _json.loads(flow_mod.simulated(graph).model_dump_json())}
+        session = None
+        analysis = None
+
+    method = next(a.statement for a in step_business(_Ctx()).assumptions
+                  if a.source == "pipeline")
+    assert "distance decay" in method and "JuPedSim" not in method
+    assert "engine is unavailable" in method, "the client should see why, not just what"
