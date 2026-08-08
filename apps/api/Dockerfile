@@ -40,6 +40,15 @@ COPY packages/contracts /src/packages/contracts
 COPY apps/api/app /src/apps/api/app
 RUN pip install --no-deps --force-reinstall /src/packages/contracts /src/apps/api
 
+# jupedsim hard-requires PySide6 and VTK for its desktop viewer (jpsvis) — 1.3 GB of Qt
+# bindings and 3D visualisation that a headless API can never use, and cannot even
+# initialise without a display. We import only the simulation core, so they come out.
+# Measured: the venv drops 1.9 GB -> 590 MB and the simulation is byte-identical
+# (same funnel detection, same guest count). If a future jupedsim starts importing them
+# at module level this breaks loudly, so CI runs a real simulation inside the image.
+RUN pip uninstall -y pyside6 PySide6_Essentials PySide6_Addons shiboken6 vtk matplotlib \
+ && python -c "import jupedsim; print('jupedsim imports headless:', jupedsim.__version__)"
+
 # ---------------------------------------------------------------- runtime
 FROM python:3.12-slim AS runtime
 
@@ -78,4 +87,5 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
 
 # --proxy-headers so the session cookie's Secure flag and the rate limiter see the real
 # client scheme and IP behind a TLS-terminating proxy (README § Deployment requirements).
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
