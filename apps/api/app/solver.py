@@ -26,6 +26,7 @@ USABLE_SHARE = {
     ZoneCategory.DINING: 0.70,
     ZoneCategory.LOUNGE: 0.70,
     ZoneCategory.BAR: 0.70,
+    ZoneCategory.RETAIL: 0.60,   # display units and shelving, densely fitted
     ZoneCategory.LOBBY: 0.60,
 }
 DEFAULT_USABLE_SHARE = 0.65
