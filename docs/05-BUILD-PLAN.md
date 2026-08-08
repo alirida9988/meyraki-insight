@@ -58,12 +58,16 @@ Implement the 7-step agent pipeline (`01-ARCHITECTURE.md` §2) in order:
   paid. This is the complete MVP loop from the decks.
 
 ## Milestone 5 — Hardening & pilot (week 8)
-- Load/failure drills: kill workers mid-run (must resume), poison inputs (must reject
-  politely), provider outage (must fail over), cost ceilings enforced ✅ `app/costs.py`.
+- Load/failure drills ✅ — kill workers mid-run (SIGKILL during the layout step against
+  the containers; resumed and finished, and the cost receipt proves intake and zones were
+  billed once, not twice), poison inputs (`tests/qa_hunt.py`), provider outage (the render
+  chain fails over FLUX → Gemini → free tier, captioning the result honestly), cost
+  ceilings enforced (`app/costs.py`).
 - Security pass: signed URLs, org isolation tests, upload sanitization, rate limits.
 - Run 3–5 real pilot projects (Cleo-class); collect founder feedback; tune prompts
   against the golden set.
-- **Exit:** pilot-ready product + demo script matching the StartupDen narrative.
+- **Exit:** pilot-ready product ✅ + demo script ✅ `artifacts/demo-script.md`.
+  Remaining for pilot: 3–5 real client projects, which needs real plans.
 
 ## Phase 2 backlog (post-MVP, from source docs)
 Interactive AI co-designer chat · A/B what-if editing · DWG ingestion (ezdxf/ODA) ·
@@ -73,8 +77,12 @@ ingestion.
 
 ## Quality gates (the "no bugs" contract)
 - Typed, validated contracts at every step boundary (Pydantic ↔ generated TS).
-- Golden-set regression in CI for the Zone Analyst; snapshot tests for heatmap renderer
-  and report PDF; contract tests for every agent prompt (schema-valid on 3 seeds).
+- Golden-set regression for the Zone Analyst (`tests/golden_set.py`, opt-in — it spends
+  model credits, so it runs before a claim rather than on every push); snapshot tests for
+  the heatmap renderer and the report ✅ `tests/test_snapshots.py`, pinned by pixel hash
+  and by HTML with the date normalised, and verified to fail on a one-digit colour change;
+  contract tests for every agent prompt (schema-valid on 3 seeds) — **still open**, since
+  each seed is a paid call.
 - QA Verifier step blocks delivery of internally inconsistent results.
 - Full audit trail per job → any bad output is reproducible and diagnosable.
 - Staging environment runs the full pipeline nightly on the golden set; cost + accuracy
