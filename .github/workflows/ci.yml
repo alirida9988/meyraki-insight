@@ -268,6 +268,39 @@ jobs:
           ANTHROPIC_API_KEY: sk-ant-ci-not-a-real-key
           MEYRAKI_SHARE_SECRET: ci-share-secret
 
+      - name: The production overlay exposes the proxy and nothing else
+        # The base file's rule is "every published port is loopback". Production inverts
+        # it: the proxy MUST be public or TLS never terminates, and everything else must
+        # publish nothing at all. Asserted rather than trusted, because `!override []` is
+        # easy to drop in a merge and the result — Postgres or a plaintext API on a public
+        # interface — looks identical until someone scans the host.
+        run: |
+          cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config)
+          echo "$cfg" | grep -qE 'MEYRAKI_HTTPS: .?1' || {
+            echo "::error::production must set MEYRAKI_HTTPS=1 or session cookies ship without Secure"; exit 1; }
+          echo "$cfg" | grep -qE 'MEYRAKI_TRUST_PROXY: .?1' || {
+            echo "::error::production must set MEYRAKI_TRUST_PROXY=1 or every client shares one rate-limit bucket"; exit 1; }
+          published=$(echo "$cfg" | grep -c 'published:' || true)
+          echo "$published published port(s) in production"
+          # 80, 443/tcp and 443/udp — the proxy, and only the proxy.
+          [ "$published" = "3" ] || {
+            echo "::error::expected exactly 3 published ports (the proxy); found $published"
+            echo "$cfg" | grep -B6 'published:'
+            exit 1
+          }
+          for port in 8000 3000 5432 6379; do
+            echo "$cfg" | grep -q "published: \"$port\"" && {
+              echo "::error::port $port is published in production — it must be reachable only through the proxy"; exit 1; }
+          done
+          echo "only the proxy is exposed"
+        env:
+          APP_DOMAIN: app.ci.invalid
+          API_DOMAIN: api.ci.invalid
+          ACME_EMAIL: ci@ci.invalid
+          POSTGRES_PASSWORD: ci-not-a-real-password
+          ANTHROPIC_API_KEY: sk-ant-ci-not-a-real-key
+          MEYRAKI_SHARE_SECRET: ci-share-secret
+
 # NOT run here, by design:
 #   apps/web/e2e (Playwright)  — needs the live stack + paid model calls
 #   apps/api/tests/qa_hunt.py  — same
