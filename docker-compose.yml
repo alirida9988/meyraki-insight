@@ -38,6 +38,12 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        # Stamped onto every analysis and reported by /health, so a delivered report can
+        # be tied to the code that produced it. Empty is tolerated — the app reports
+        # "unknown" rather than refusing to start — but a release build should set it:
+        #   GIT_SHA=$(git rev-parse --short HEAD) docker compose build api
+        GIT_SHA: ${GIT_SHA:-}
     environment:
       DATABASE_URL: postgresql+psycopg://meyraki:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/meyraki
       UPLOAD_DIR: /data/uploads

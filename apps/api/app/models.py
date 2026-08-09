@@ -87,6 +87,10 @@ class Analysis(Base):
     # A stable hash of the requested inputs.  It lets the database reject a duplicate
     # active run while still allowing a studio to deliberately re-run an analysis later.
     request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Which build produced this. Written once at creation and never updated: a resumed
+    # analysis keeps the sha it started under, because that is the code that wrote the
+    # steps already on disk.
+    app_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     """Bumped by the runner per step; a 'running' row with a stale heartbeat is a crashed
