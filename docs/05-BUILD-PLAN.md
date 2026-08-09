@@ -94,7 +94,24 @@ ingestion.
   "roughly double the English budget" the design rule for any Arabic-facing prompt.
   Headroom today: intake 4–6% of 2048 · zones 5–38% · layout 15–19% · moodboard 10–12%
   of 4096 · report 7–18%.
-- QA Verifier step blocks delivery of internally inconsistent results.
-- Full audit trail per job → any bad output is reproducible and diagnosable.
+- QA Verifier step blocks delivery of internally inconsistent results ✅ — and it did
+  *not* until 2026-08-09. The verifier is step 9 while the report is written in step 8, so
+  the PDF exists on disk before the inconsistency is found; a failed verdict set
+  `analysis.status = "failed"` and nothing consulted that status again. A studio could
+  mint a client link for an analysis whose layout referenced zones the Zone Analyst never
+  produced. The line is now drawn at delivery rather than access: the owner may still
+  download a failed report (diagnosis, their own data), while minting a client link
+  returns 409 naming the QA issue and redeeming one returns the uniform 404. Redemption is
+  re-checked because an analysis clean when shared can be re-run and fail, and a link
+  already in a client's inbox must go dead. Verified live over HTTP against Postgres,
+  not only through the test client (`tests/test_qa_blocks_delivery.py`).
+- Full audit trail per job → any bad output is **diagnosable**: every step persists its
+  validated output, its error and its timings, and `cost_entries` records the model id,
+  tokens and spend for each call, so you can see the exact zone graph a bad layout was
+  built from. **Reproducible only within model nondeterminism** — the same plan re-run
+  will not produce byte-identical output, and the raw pre-repair model response is not
+  kept. Known gap: `CONTRACT_VERSION` exists but is not stamped on an analysis, so a
+  report produced before a prompt change is indistinguishable from one produced after.
+  Worth closing before any client disputes a delivered number.
 - Staging environment runs the full pipeline nightly on the golden set; cost + accuracy
   drift alarms.
