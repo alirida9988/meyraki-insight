@@ -34,6 +34,24 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    # Shared rate-limit windows. Without this every API worker keeps its own counters and
+    # the configured ceiling is silently multiplied by the worker count — which matters
+    # most for the auth limit, the one that slows password guessing.
+    #
+    # Not published, same reasoning as the database: the API reaches it over the compose
+    # network and a host port would be pure extra surface. No persistence is configured
+    # on purpose — these windows are a minute long, and losing them on restart costs one
+    # minute of throttling, not data.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -46,6 +64,7 @@ services:
         GIT_SHA: ${GIT_SHA:-}
     environment:
       DATABASE_URL: postgresql+psycopg://meyraki:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/meyraki
+      MEYRAKI_REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /data/uploads
       MEYRAKI_WEB_ORIGINS: ${MEYRAKI_WEB_ORIGINS:-http://localhost:3000}
       # Behind a TLS proxy set MEYRAKI_HTTPS=1 and MEYRAKI_TRUST_PROXY=1 in .env, or the
@@ -72,6 +91,11 @@ services:
       - "127.0.0.1:8000:8000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
+        # Not strictly required to boot — the limiter degrades to per-process windows and
+        # logs a warning — but waiting means a fresh stack never serves traffic with the
+        # auth ceiling quietly multiplied by the worker count.
         condition: service_healthy
     restart: unless-stopped
 
