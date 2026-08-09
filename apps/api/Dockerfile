@@ -70,6 +70,14 @@ WORKDIR /app
 COPY packages/contracts /app/packages/contracts
 COPY apps/api /app/apps/api
 
+# Which commit this image was built from. A container carries no git history, so the sha
+# has to be baked in at build time or the running instance cannot say what it is:
+#   docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) ...
+# Declared AFTER the COPY layers on purpose — the value changes on every commit, and
+# putting it earlier would invalidate the dependency and browser layers each rebuild.
+ARG GIT_SHA=""
+ENV MEYRAKI_GIT_SHA=$GIT_SHA
+
 # Non-root, and it must own the upload volume mountpoint or the first save fails.
 RUN useradd --create-home --uid 10001 meyraki \
  && mkdir -p /data/uploads \

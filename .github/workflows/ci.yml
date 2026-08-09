@@ -127,8 +127,21 @@ jobs:
           push: false
           load: true
           tags: meyraki-api:ci
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api
+
+      - name: The image must know which commit it was built from
+        # An image that cannot say what it is makes every incident start with guesswork,
+        # and it silently breaks the analysis provenance stamp: a container has no git
+        # history, so if the build argument is not wired through, every analysis it runs
+        # is recorded as "unknown" and no report can be traced back to its code.
+        run: |
+          got=$(docker run --rm --entrypoint python meyraki-api:ci -c \
+            "import os,sys; sys.path.insert(0,'/app/apps/api'); from app.version import build_version; print(build_version())")
+          echo "image reports build: $got"
+          test "$got" = "${{ github.sha }}" || { echo "expected ${{ github.sha }}"; exit 1; }
 
       - name: The image must actually be able to render a PDF
         # The report deliverable is printed by Chromium inside this image. An image that

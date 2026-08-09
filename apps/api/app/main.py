@@ -19,7 +19,7 @@ from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schem
 
 from . import auth as auth_mod
 from . import sharing
-from . import footfall, ratelimit, settings, storage
+from . import footfall, ratelimit, settings, storage, version
 from .db import SessionLocal, get_session, init_db
 from .models import Analysis, CostEntry, Event, Org, Project, StepRun, Upload, User
 from .pipeline import STEP_NAMES, run_analysis
@@ -143,8 +143,10 @@ def health(response: Response, session: Session = Depends(get_session)) -> dict:
     except Exception as exc:  # noqa: BLE001 — the reason belongs in the response
         response.status_code = 503
         return {"status": "unavailable", "database": str(exc)[:120],
-                "contracts": CONTRACT_VERSION}
-    return {"status": "ok", "contracts": CONTRACT_VERSION}
+                "contracts": CONTRACT_VERSION, "build": version.build_version()}
+    # `build` is here so a deployed instance can be identified without shell access:
+    # "which commit is actually serving this?" is the first question of any incident.
+    return {"status": "ok", "contracts": CONTRACT_VERSION, "build": version.build_version()}
 
 
 @app.get("/contracts")
@@ -344,6 +346,7 @@ def start_analysis(
         floorplan_upload_id=body.floorplan_upload_id,
         footfall_upload_id=body.footfall_upload_id,
         request_fingerprint=fingerprint,
+        app_version=version.build_version(),
     )
     session.add(analysis)
     session.flush()
