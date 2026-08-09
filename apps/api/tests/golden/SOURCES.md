@@ -31,6 +31,48 @@ rather than leaving it to be rediscovered.
   was tried and the Intake Agent correctly rejected it as `low_res`, which is the
   product working, not a failure.
 
+## Round 2 — the hotel guest-floor gap, closed (2026-08-09)
+
+Round 1 of the sourcing effort returned public CAD repositories: **DWG**, which this
+product does not read, and previews watermarked by the vendor with unclear reuse rights.
+Real plans came out of it and one of them found the missing `guestroom` category, but
+none of them could be committed here. Round 2 asked a narrower question — a hotel ground
+floor and a bedroom floor **from the same property**, in a format we ingest, under a
+licence we can keep — and found it.
+
+**Park Lane Hotel, London.** `park_lane_ground.png` and `park_lane_guestfloor.png`, both
+from *Hotel Monthly* (Chicago), Volume 35, Number 410, May 1927, page 62. Published in
+the United States before 1928, therefore public domain there.
+
+Licence verified directly against the Wikimedia Commons `imageinfo` API rather than taken
+from the sourcing report: `LicenseShortName: Public domain`, `UsageTerms: Public domain`,
+`Restrictions: none`. The report cited PICRYL, which mirrors Commons and blocks automated
+access with a 403; going to Commons gives the same files with first-party licence
+metadata, which is the version worth trusting.
+
+Why this pair specifically:
+
+- The benchmark had **never contained a hotel guest-room floor** — the plan class that
+  hid the missing `guestroom` category until a real drawing arrived. `guestroom` is now a
+  required category on that plan, so the gap cannot silently reopen.
+- Having the public floor **and** the bedroom floor of one building means the two can be
+  compared directly. They read completely differently: the ground floor is lounges,
+  restaurants and six retail concessions; the bedroom floor is twenty rooms and corridor.
+
+Backups from the same trade-press provenance, all public domain, not committed because
+five hold-out plans already cost real credits per benchmark run: Farragut Hotel
+(Knoxville, four floors), Hotel Alexandria (Los Angeles), Commodore Perry (Toledo, four
+floors), Peabody (Memphis), Mount Royal (Montreal, the most floor variety of any single
+property).
+
+**Rejected on licence, despite being the best-labelled restaurants found.** Camden
+Council's planning portal hosts a Primrose Hill pub-restaurant and a Chalton Street
+restaurant with the most detailed back-of-house of anything located — cellars, walk-ins,
+servery, coldrooms, staff changing. The *page* is public for statutory consultation; the
+*drawing* remains the architect's copyright. Viewing is not reuse, so they stay out of
+this directory unless permission is obtained in writing. This is the same reasoning that
+excluded CubiCasa5K and FloorPlanCAD, applied consistently.
+
 ## The gap only real plans can close
 
 **No open Arabic or MENA floorplan dataset exists.** Arabic *reports* are tested end to
@@ -39,3 +81,18 @@ differentiator. [Archnet](https://www.archnet.org) (MIT) is the best archive of
 Islamic-world architecture but is photographic and scholarly rather than a labelled plan
 set. Closing this needs real plans from the founder's network — ideally anonymised
 client drawings with Arabic room labels.
+
+Two independent sourcing rounds have now failed to find one, and the shape of the failure
+is consistent enough to be worth recording as a finding rather than a to-do: **Arabic room
+labels turn up almost exclusively on residential drawings** — villas, majlis, apartments.
+Every hospitality plan located in either round was labelled in English, Spanish or
+Vietnamese. That matches how the region actually procures hospitality work, through
+international consultants who draft in English, and it suggests the practical exposure is
+smaller than "untested" makes it sound. It does not remove the risk; a Gulf client with an
+Arabic-labelled drawing would still be reading uncharted behaviour. One real anonymised
+plan would settle it, and nothing short of that will.
+
+An Arabic *residential* plan was tested informally in round 1 and read correctly, including
+`مجلس رجال` typed as a lounge — worth knowing, but not evidence about hospitality plans,
+and deliberately not committed here: it is residential, low-resolution, and its licence
+was never established.
