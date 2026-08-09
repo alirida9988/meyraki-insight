@@ -19,6 +19,7 @@ dependencies = [
     "bcrypt>=4.1",
     "jupedsim>=1.4",  # LGPL-3.0, unmodified pip dependency (docs/04 §3)
     "alembic>=1.13",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
