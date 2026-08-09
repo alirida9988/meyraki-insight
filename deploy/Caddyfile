@@ -1,0 +1,72 @@
+# TLS termination for Meyraki Insight.
+#
+# Caddy rather than nginx plus certbot: certificates are obtained and renewed automatically
+# from Let's Encrypt with no cron job, no renewal hook and no expiry to forget. The
+# certificate that silently fails to renew is the classic self-hosted outage.
+#
+# Two hostnames rather than one with a /api prefix. Prefix routing would mean rewriting
+# paths at the proxy, and every rewrite is somewhere for a redirect, a Location header or a
+# cookie path to go subtly wrong. Two names cost one extra DNS record and remove that class
+# of bug entirely.
+#
+# IMPORTANT: both names must share a registrable domain (app.example.com and
+# api.example.com, not meyraki-app.com and meyraki-api.com). The session cookie is
+# SameSite=Lax, which the browser evaluates per *site*, not per origin — subdomains of one
+# domain are same-site and the cookie is sent; two unrelated domains are not, and every
+# signed-in request would silently arrive without a session.
+
+{
+	# Where Let's Encrypt sends expiry and problem notices. Set ACME_EMAIL in .env.
+	email {$ACME_EMAIL}
+}
+
+# ---------------------------------------------------------------- the app
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
+
+	header {
+		# Tell browsers to refuse plain HTTP for this host in future. Deliberately without
+		# `preload` — that submits the domain to a browser-shipped list and is effectively
+		# irreversible, which is not a decision a config file should make silently.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# ---------------------------------------------------------------- the API
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	# Reports are streamed as PDFs and floorplans arrive as large scans; the default
+	# buffering limits would truncate a 25 MB architectural upload.
+	request_body {
+		max_size 64MB
+	}
+
+	reverse_proxy api:8000 {
+		# The API sets Secure cookies and rate-limits per client IP. Both depend on the
+		# proxy telling it the truth about the original request, and the API must be run
+		# with MEYRAKI_TRUST_PROXY=1 for the forwarded address to be believed.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		# A full analysis runs nine steps including several model calls; the default
+		#
+		# proxy read timeout would cut the connection mid-pipeline.
+		transport http {
+			read_timeout 600s
+			write_timeout 600s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

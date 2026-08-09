@@ -1,0 +1,63 @@
+# Production overlay: TLS at the edge, nothing else exposed.
+#
+#   cp .env.example .env          # then set APP_DOMAIN, API_DOMAIN, ACME_EMAIL and the keys
+#   GIT_SHA=$(git rev-parse --short HEAD) \
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# The base file publishes the API and web on 127.0.0.1 so a developer can reach them.
+# Here they are published on NO host port at all: the proxy reaches them over the compose
+# network, and the only thing listening on a public interface is Caddy on 80 and 443.
+# Loopback publishing would be harmless but pointless, and every port that exists is a
+# port someone can misconfigure a firewall around.
+#
+# Deliberately not included, because they are decisions rather than defaults: a managed
+# Postgres, object storage for uploads, and backups. The compose database is a real
+# database with a real volume and it works — but a single host with no automated restore
+# is not where client floorplans should live long term.
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"     # ACME HTTP-01 challenge and the redirect to HTTPS
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means re-issuing on next
+      # start, which Let's Encrypt rate-limits — five per week per domain.
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env, e.g. app.meyraki.com}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env, e.g. api.meyraki.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env — Let's Encrypt sends expiry notices here}
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  api:
+    # No host port: reached only through the proxy.
+    ports: !override []
+    environment:
+      # A terminating proxy does not add Secure to a cookie on its own, and without it the
+      # session token travels in plaintext the first time a client types the bare hostname.
+      MEYRAKI_HTTPS: "1"
+      # Behind a proxy every request presents the proxy's address, so without this the
+      # rate limiter puts every customer in one bucket — one busy studio would throttle
+      # everyone. Safe here precisely because the proxy is the only ingress.
+      MEYRAKI_TRUST_PROXY: "1"
+      MEYRAKI_WEB_ORIGINS: https://${APP_DOMAIN}
+
+  web:
+    ports: !override []
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+
+volumes:
+  caddy-data:
+  caddy-config:

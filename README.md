@@ -86,11 +86,41 @@ Two things that bite if you skip them:
   web image is therefore environment-specific — a staging image cannot be promoted to
   production unchanged. Build one per environment, and use the URL the *browser* can
   reach, never the compose service name.
-- **Ports are published on `127.0.0.1` only.** Nothing in the compose file terminates TLS
-  or authenticates at the edge. Put a TLS proxy in front, and set both `MEYRAKI_HTTPS=1`
-  and `MEYRAKI_TRUST_PROXY=1` — without the first the session cookie ships without
-  `Secure`; without the second the rate limiter sees the proxy's IP as every client, so
-  one visitor can exhaust everyone's quota.
+- **The base compose file publishes on `127.0.0.1` only** and terminates no TLS. It is a
+  development stack. For anything reachable from outside the host, use the production
+  overlay below rather than opening those ports.
+
+### Deploying with TLS
+
+```bash
+cp .env.example .env      # set APP_DOMAIN, API_DOMAIN, ACME_EMAIL and the keys
+GIT_SHA=$(git rev-parse --short HEAD) \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+The overlay adds Caddy, which obtains and renews Let's Encrypt certificates by itself —
+no cron job and no renewal hook, because the certificate that silently fails to renew is
+the classic self-hosted outage. It also removes the API and web host ports entirely, so
+the only thing on a public interface is the proxy on 80 and 443, and CI asserts that.
+
+It sets `MEYRAKI_HTTPS=1`, `MEYRAKI_TRUST_PROXY=1`, `MEYRAKI_WEB_ORIGINS` and
+`NEXT_PUBLIC_API_URL` for you from the two domain names. Do not also set them by hand.
+Without the first the session cookie ships without `Secure`; without the second the rate
+limiter sees the proxy's IP as every client, so one visitor can exhaust everyone's quota.
+
+**Both names must share a registrable domain** — `app.meyraki.com` and `api.meyraki.com`,
+not `meyraki-app.com` and `meyraki-api.com`. The session cookie is `SameSite=Lax`, which
+browsers judge per *site* rather than per origin: subdomains of one domain are same-site
+and the cookie is sent; two unrelated domains are not, and every signed-in request would
+arrive without a session while looking, in the logs, like a login problem.
+
+Point both names at the host with A records before starting, or the ACME challenge fails
+and Let's Encrypt rate-limits retries to five per domain per week.
+
+**Still a single host.** The overlay runs Postgres in a container with a volume. That is a
+real database and it works, but there is no automated restore, and client floorplans
+should not live on one machine indefinitely — managed Postgres and object storage are the
+remaining deployment decisions.
 
 ### Schema changes
 
