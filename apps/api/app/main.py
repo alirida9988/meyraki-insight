@@ -489,6 +489,17 @@ def share_report(
     report_step = next((s for s in analysis.steps if s.name == "report"), None)
     if not (report_step and (report_step.output or {}).get("report_key")):
         raise HTTPException(404, "Report not ready for this analysis")
+    # The QA Verifier runs after the report is written, so a report file exists even for
+    # an analysis whose layout references zones the Zone Analyst never produced. Marking
+    # the analysis "failed" was never enough on its own: this is the endpoint that puts a
+    # document in a client's hands, so this is where the gate has to bite.
+    if analysis.status != "done":
+        raise HTTPException(
+            409,
+            "This analysis did not pass QA, so it cannot be shared with a client. "
+            f"Status: {analysis.status}."
+            + (f" {analysis.error}" if analysis.error else ""),
+        )
     try:
         signature, expires_at = sharing.mint(analysis_id, ttl_days * 24 * 3600)
     except sharing.SharingDisabled as exc:
@@ -513,9 +524,13 @@ def shared_report(
     if not sharing.verify(analysis_id, expires, sig):
         raise HTTPException(404, "This link is not valid or has expired")
     analysis = session.get(Analysis, analysis_id)
-    report_step = (
-        next((s for s in analysis.steps if s.name == "report"), None) if analysis else None
-    )
+    # Re-checked here and not only at minting: an analysis that was clean when the link
+    # was sent can be re-run and fail, and a link already sitting in a client's inbox
+    # must go dead rather than keep serving the superseded document. Same 404 as every
+    # other failure, so the endpoint still tells an outsider nothing.
+    if analysis is None or analysis.status != "done":
+        raise HTTPException(404, "This link is not valid or has expired")
+    report_step = next((s for s in analysis.steps if s.name == "report"), None)
     key = (report_step.output or {}).get("report_key") if report_step else None
     if not key:
         raise HTTPException(404, "This link is not valid or has expired")
