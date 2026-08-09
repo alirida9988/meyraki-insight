@@ -69,6 +69,42 @@ Implement the 7-step agent pipeline (`01-ARCHITECTURE.md` §2) in order:
 - **Exit:** pilot-ready product ✅ + demo script ✅ `artifacts/demo-script.md`.
   Remaining for pilot: 3–5 real client projects, which needs real plans.
 
+## Milestone 6 — Deployment (deferred to last by founder directive, started 2026-08-09)
+
+Held back deliberately until everything it would carry was finished, on the reasoning that
+hosting is a going-live decision rather than a build one.
+
+- Build provenance ✅ — the commit sha is baked into the image and stamped on every
+  analysis, so a delivered report traces to the code that produced it. `/health` reports
+  it, and CI asserts the built image knows its own sha rather than only that the build
+  argument was passed. Closes the audit-trail gap recorded above: `CONTRACT_VERSION`
+  versions the contracts, not the prompts, and prompts are what move a report's numbers.
+- Shared rate limiting ✅ — windows move to Redis when `MEYRAKI_REDIS_URL` is set. The
+  per-process limiter was correct for one worker and a security defect for any real
+  deployment: measured, a second worker granted five more attempts on an exhausted auth
+  budget. Same sliding window in both backends, a Lua script so the check and the write
+  cannot race, and a fallback to per-process windows with a warning if Redis is
+  unreachable — failing closed would turn a Redis blip into an outage.
+- TLS at the edge ✅ — `docker-compose.prod.yml` adds Caddy, which renews certificates
+  without a cron job, and removes every other host port. CI asserts only the proxy is
+  published, and the guard was proven by deleting the API's port override. Two hostnames
+  rather than a path prefix, which requires both to share a registrable domain: the
+  session cookie is `SameSite=Lax`, judged per site, and unrelated domains would drop
+  every session while looking exactly like a login bug.
+- Staging verification ✅ — `scripts/staging_smoke.sh` starts the real overlay on
+  `*.localhost` (Caddy's internal CA, no ACME) and asserts what rendered YAML cannot:
+  TLS terminates, plain HTTP redirects, the session cookie carries `Secure`, and only the
+  proxy publishes a port. 14/14.
+- **Open, and a decision rather than a task:** managed Postgres and object storage. The
+  overlay still runs Postgres in a container on one host with a volume and no automated
+  restore. That is a real database and it works, but it is not where client floorplans
+  should live, and the choice of provider and **region** is commercial before it is
+  technical — GCC hospitality clients frequently make data residency a procurement
+  requirement, and choosing before there is client data costs nothing while migrating a
+  live database later is a project.
+- **Exit:** a deployment that terminates TLS, shares its rate limits, and can say what
+  code it is running — reached. Durable storage remains.
+
 ## Phase 2 backlog (post-MVP, from source docs)
 Interactive AI co-designer chat · A/B what-if editing · DWG ingestion (ezdxf/ODA) ·
 SketchUp/AutoCAD/Figma export · sentiment/emotional zoning · Layout Sentiment Score ·
