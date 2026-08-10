@@ -34,6 +34,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import urllib.parse
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -108,6 +109,28 @@ def _s3():
     )
 
 
+COMPOSE_NETWORK = "meyraki_default"
+_network = None  # set by --compose
+
+
+def _pg(args: list[str], stdin: bytes | None = None, timeout: int = 1800):
+    """Run a postgres client tool in a throwaway container.
+
+    Every database call goes through here, in both modes, because the alternative is
+    caring where the database happens to be bound. Rebinding the development database to
+    loopback for security immediately broke a version of this that reached it through
+    host.docker.internal — the dump started failing with "connection refused", which reads
+    like the database is down rather than like the backup tool is looking in the wrong
+    place. Attaching to a network, or to the host gateway, is a flag rather than a rewrite.
+    """
+    cmd = ["docker", "run", "--rm", "-i",
+           "--add-host", "host.docker.internal:host-gateway"]
+    if _network:
+        cmd += ["--network", _network]
+    cmd += ["-e", "PGCONNECT_TIMEOUT=15", PG_IMAGE] + args
+    return subprocess.run(cmd, input=stdin, capture_output=True, timeout=timeout)
+
+
 def _docker_dsn(dsn: str) -> str:
     """Rewrite a host-local DSN so it resolves from inside a container.
 
@@ -120,12 +143,7 @@ def _docker_dsn(dsn: str) -> str:
 
 def dump(dsn: str, path: pathlib.Path) -> None:
     """pg_dump in custom format: compressed, and restorable table by table."""
-    proc = subprocess.run(
-        ["docker", "run", "--rm", "-i", "--add-host", "host.docker.internal:host-gateway",
-         "-e", f"PGCONNECT_TIMEOUT=15", PG_IMAGE,
-         "pg_dump", "--format=custom", "--no-owner", "--no-acl", _docker_dsn(dsn)],
-        capture_output=True, timeout=1800,
-    )
+    proc = _pg(["pg_dump", "--format=custom", "--no-owner", "--no-acl", _docker_dsn(dsn)])
     if proc.returncode != 0:
         sys.exit(f"pg_dump failed: {proc.stderr.decode()[:400]}")
     path.write_bytes(proc.stdout)
@@ -134,15 +152,14 @@ def dump(dsn: str, path: pathlib.Path) -> None:
 
 
 def source_counts(dsn: str) -> dict[str, int]:
-    import psycopg
-
+    """Row counts from the source, read through a container for the same reason as above."""
     counts = {}
-    with psycopg.connect(dsn, connect_timeout=20) as conn:
-        for table in CHECKED_TABLES:
-            try:
-                counts[table] = conn.execute(f'select count(*) from "{table}"').fetchone()[0]
-            except Exception:
-                conn.rollback()  # table absent on this deployment; not an error
+    for table in CHECKED_TABLES:
+        got = _pg(["psql", _docker_dsn(dsn), "-tAc", f'select count(*) from "{table}"'],
+                  timeout=120)
+        value = got.stdout.decode().strip()
+        if got.returncode == 0 and value.isdigit():
+            counts[table] = int(value)
     return counts
 
 
@@ -203,10 +220,25 @@ def main() -> int:
                         help="restore the new dump into a throwaway Postgres and check it")
     parser.add_argument("--verify-only", action="store_true",
                         help="verify the newest backup already in the bucket")
+    parser.add_argument("--compose", action="store_true",
+                        help="back up the DEPLOYED database (the compose `db` service) "
+                             "rather than the local development one")
     args = parser.parse_args()
 
     _load_dotenv()
-    dsn = _database_url()
+    if args.compose:
+        # The deployed database publishes no host port — by design — so it is reachable
+        # only from inside the compose network. Pointing this at the development database
+        # instead would be the worst kind of backup: one that succeeds nightly, verifies
+        # cleanly, and protects data nobody is using.
+        global _network
+        _network = COMPOSE_NETWORK
+        password = os.environ.get("POSTGRES_PASSWORD", "").strip()
+        if not password:
+            sys.exit("POSTGRES_PASSWORD is not set — it is needed to reach the deployed database")
+        dsn = f"postgresql://meyraki:{urllib.parse.quote(password, safe='')}@db:5432/meyraki"
+    else:
+        dsn = _database_url()
     bucket = _env("MEYRAKI_S3_BUCKET")
     s3 = _s3()
     print(f"database: {_safe(dsn)}")
