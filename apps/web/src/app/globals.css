@@ -79,9 +79,48 @@ body {
 .dim-line .dim-rule::before { inset-inline-start: 0; }
 .dim-line .dim-rule::after { inset-inline-end: 0; }
 
+/* Motion: purposeful, short, and always optional.
+   160-220ms is long enough to be perceived as a transition and short enough that a user
+   clicking through a workspace never waits for it. */
+@keyframes reveal-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.reveal { animation: reveal-in 200ms cubic-bezier(0.2, 0, 0.2, 1) both; }
+/* Staggering result sections reads as "the analysis is resolving" rather than as a page
+   repaint. Kept to three steps: beyond that it becomes a wait. */
+.reveal-1 { animation-delay: 60ms; }
+.reveal-2 { animation-delay: 120ms; }
+.reveal-3 { animation-delay: 180ms; }
+
+/* Skeletons stand in for content whose shape we already know, so the layout does not
+   jump when it arrives. */
+@keyframes skeleton-sheen {
+  0%   { opacity: 0.55; }
+  50%  { opacity: 0.95; }
+  100% { opacity: 0.55; }
+}
+.skeleton {
+  background: var(--hairline);
+  animation: skeleton-sheen 1.4s ease-in-out infinite;
+  border-radius: 2px;
+}
+
+/* A step that has just completed pulses its rule once — the one place a moving element
+   earns its keep, because it marks progress the user is waiting on. */
+@keyframes step-settle {
+  from { opacity: 0.35; }
+  to   { opacity: 1; }
+}
+.step-settle { animation: step-settle 200ms ease-out both; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+  /* The skeleton still needs to read as "not content yet" without pulsing. */
+  .skeleton { animation: none; opacity: 0.7; }
 }

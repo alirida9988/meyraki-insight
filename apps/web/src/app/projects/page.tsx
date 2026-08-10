@@ -69,12 +69,48 @@ type Results = {
 };
 
 const SPACE_TYPES = ["hotel", "cafe", "restaurant", "coworking", "office", "clinic", "gallery", "other"];
+/** `label` is also the button's accessible name, so it is the string the browser tests
+ *  assert on — the outcome line is attached with aria-describedby rather than folded into
+ *  the name, which keeps the control readable to a screen reader without changing what it
+ *  is called. */
 const OBJECTIVES = [
-  { id: "guest_flow", label: "Maximize guest flow" },
-  { id: "seating_efficiency", label: "Seating efficiency" },
-  { id: "revenue_per_sqm", label: "Revenue per sqm" },
-  { id: "ambiance", label: "Ambiance" },
+  {
+    id: "guest_flow",
+    label: "Maximize guest flow",
+    outcome: "Reduce congestion and improve movement",
+  },
+  {
+    id: "seating_efficiency",
+    label: "Seating efficiency",
+    outcome: "Find capacity without harming comfort",
+  },
+  {
+    id: "revenue_per_sqm",
+    label: "Revenue per sqm",
+    outcome: "Prioritise the highest-value use of space",
+  },
+  {
+    id: "ambiance",
+    label: "Ambiance",
+    outcome: "Improve guest experience and visual direction",
+  },
 ];
+
+/** The pipeline's step names are internal. These are what a designer would call them.
+ *  Any step without an entry falls back to its own name rather than inventing one. */
+const STEP_COPY: Record<string, string> = {
+  intake: "Reading floorplan",
+  routing: "Planning the analysis",
+  zones: "Mapping zones",
+  flow: "Simulating circulation",
+  layout: "Testing layout options",
+  moodboard: "Composing design direction",
+  business: "Calculating impact",
+  report: "Preparing the report",
+  qa: "Checking consistency",
+};
+
+const MAX_UPLOAD_MB = 25;
 
 /** API `detail` payloads arrive as string | {errors: string[]} | pydantic array. */
 function detailToMessages(detail: unknown): string[] {
@@ -97,6 +133,159 @@ function DimLine({ label, right }: { label: string; right?: string }) {
       <span className="dim-rule" />
       {right ? <span className="dim-label">{right}</span> : null}
     </div>
+  );
+}
+
+/** A file field that looks like a place to put a plan rather than a form control.
+ *
+ *  The native <input type="file"> is kept in the DOM and merely visually hidden: it is what
+ *  the browser tests drive, it is what makes the whole zone keyboard-operable through its
+ *  label, and re-implementing a file picker to look prettier would trade all of that for
+ *  nothing. Drag-and-drop is added on top with native HTML5 events, so no dependency.
+ */
+function UploadZone({
+  id,
+  accept,
+  label,
+  hint,
+  fileName,
+  optional,
+  onFile,
+}: {
+  id: string;
+  accept: string;
+  label: string;
+  hint: string;
+  fileName: string | null;
+  optional?: boolean;
+  onFile: (f: File) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) onFile(f);
+      }}
+      // focus-within earns its place here: the <input> is visually hidden so the zone can
+      // be styled, which means a keyboard user's focus ring would otherwise land on
+      // something invisible. The zone adopts the ring on their behalf.
+      className={`rounded-sheet border border-dashed p-4 transition-colors duration-200 focus-within:border-viridian focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-viridian ${
+        dragging
+          ? "border-viridian bg-viridian-tint"
+          : fileName
+            ? "border-viridian/50 bg-surface"
+            : "border-hairline bg-surface hover:border-graphite"
+      }`}
+    >
+      <label htmlFor={id} className="block cursor-pointer">
+        <span className="flex items-baseline justify-between gap-2">
+          <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+            {label}
+          </span>
+          {optional ? (
+            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-graphite">
+              Optional
+            </span>
+          ) : null}
+        </span>
+
+        {fileName ? (
+          <span className="reveal mt-2 flex items-center gap-2 text-[15px]">
+            {/* The tick is part of the text on purpose: status must never be carried by
+                colour alone. */}
+            <span className="font-medium text-viridian">{fileName} ✓</span>
+          </span>
+        ) : (
+          <span className="mt-2 block text-[15px] text-graphite">
+            Drop a file here, or{" "}
+            <span className="text-ink underline underline-offset-4">choose one</span>
+          </span>
+        )}
+
+        <span className="mt-1 block font-mono text-[11px] text-graphite">{hint}</span>
+      </label>
+
+      <input
+        ref={inputRef}
+        id={id}
+        type="file"
+        accept={accept}
+        className="sr-only"
+        onChange={(e) => {
+          const f = e.currentTarget.files?.[0];
+          e.currentTarget.value = ""; // same-file re-pick must re-fire (finding #7)
+          if (f) onFile(f);
+        }}
+      />
+
+      {fileName ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="mt-3 rounded-sheet border border-hairline px-3 py-1.5 text-[13px] text-graphite transition-colors duration-200 hover:border-graphite hover:text-ink"
+        >
+          Replace file
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The analysis timeline. Reads the real step list — no invented percentage, because the
+ *  API does not report one and a fabricated bar is worse than an honest list. */
+function Timeline({ steps, status }: { steps: StepInfo[]; status: string | null }) {
+  const activeIndex = steps.findIndex((s) => s.status === "running" || s.status === "pending");
+  return (
+    <ol className="mt-3 space-y-0">
+      {steps.map((s, i) => {
+        const done = s.status === "done";
+        const failed = s.status === "failed";
+        const active = i === activeIndex && (status === "running" || status === "queued");
+        return (
+          <li
+            key={s.name}
+            className={`flex items-start gap-3 border-b border-hairline py-2 last:border-b-0 ${
+              done ? "step-settle" : ""
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200 ${
+                failed
+                  ? "bg-thermal"
+                  : done
+                    ? "bg-viridian"
+                    : active
+                      ? "bg-ink"
+                      : "bg-hairline"
+              }`}
+            />
+            <span className="flex-1">
+              <span
+                className={`text-[15px] ${done || active ? "text-ink" : "text-graphite"}`}
+              >
+                {STEP_COPY[s.name] ?? s.name}
+              </span>
+              {/* Kept verbatim — "qa · done" is the machine-readable register the browser
+                  tests and the founder's demo both read. */}
+              <span className="ms-2 font-mono text-xs uppercase text-graphite">
+                {s.name} · {s.status}
+              </span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -396,14 +585,28 @@ export default function ProjectsPage() {
   const inputCls =
     "w-full rounded-sheet border border-hairline bg-surface px-3 py-2 text-[15px] outline-none focus:border-viridian";
 
+  // Ready to hand over: everything the results panel needs has arrived.
+  const finished = status === "done";
+  const best = results?.scenarios?.length
+    ? [...results.scenarios].sort(
+        (a, b) =>
+          Number(b.solver_feasible) - Number(a.solver_feasible) || b.confidence - a.confidence,
+      )[0]
+    : null;
+
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-6 py-10">
-      <header className="mb-10 flex items-baseline justify-between">
+    <main className="mx-auto w-full max-w-[1240px] px-4 py-8 sm:px-6 sm:py-10">
+      <header className="mb-8 flex flex-wrap items-baseline justify-between gap-4">
         <Link href="/" className="font-serif text-[28px] tracking-tight">
-          Méyraki <span className="ms-2 font-mono text-xs uppercase tracking-[0.18em] text-graphite">Insight</span>
+          Méyraki{" "}
+          <span className="ms-2 font-mono text-xs uppercase tracking-[0.18em] text-graphite">
+            Insight
+          </span>
         </Link>
         <div className="flex items-center gap-4">
-          <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Projects</span>
+          <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+            Projects
+          </span>
           <button
             onClick={async () => {
               esRef.current?.close();
@@ -411,46 +614,62 @@ export default function ProjectsPage() {
               await apiFetch("/auth/logout", { method: "POST" });
               router.push("/login");
             }}
-            className="rounded-sheet border border-hairline px-3 py-1.5 text-sm text-graphite transition-colors hover:border-graphite"
+            className="rounded-sheet border border-hairline px-3 py-1.5 text-sm text-graphite transition-colors duration-200 hover:border-graphite hover:text-ink"
           >
             Sign out
           </button>
         </div>
       </header>
 
-      <div className="grid gap-10 md:grid-cols-[320px_1fr]">
-        {/* left: project list + create */}
-        <section>
+      <div className="grid gap-8 lg:grid-cols-[300px_1fr] lg:gap-10">
+        {/* ---------------------------------------------------------------- left rail */}
+        <aside className="lg:sticky lg:top-8 lg:self-start">
           <DimLine label="Projects" right={loadState === "ready" ? String(projects.length) : "…"} />
+
           {loadState === "error" ? (
             <div className="mt-4 rounded-sheet border border-hairline bg-surface p-3 text-sm">
-              <p className="text-graphite">Couldn&apos;t reach the server — your projects are safe, but we can&apos;t load them right now.</p>
+              <p className="text-graphite">
+                Couldn&apos;t reach the server — your projects are safe, but we can&apos;t load
+                them right now.
+              </p>
               <button
                 onClick={() => {
                   setLoadState("loading"); // an event handler is the right place for this
                   fetchProjects().then(applyProjects).catch(handleLoadError);
                 }}
-                className="mt-2 min-h-10 rounded-sheet border border-hairline px-3 py-1.5 text-sm hover:border-graphite"
+                className="mt-2 min-h-10 rounded-sheet border border-hairline px-3 py-1.5 text-sm transition-colors duration-200 hover:border-graphite"
               >
                 Try again
               </button>
             </div>
           ) : loadState === "loading" ? (
-            <p className="mt-4 text-sm text-graphite">Loading projects…</p>
+            <div className="mt-4 space-y-2" aria-busy="true" aria-live="polite">
+              <span className="sr-only">Loading projects…</span>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="skeleton h-10 w-full" />
+              ))}
+            </div>
+          ) : projects.length === 0 ? (
+            <p className="mt-4 text-sm text-graphite">
+              No projects yet. Create one below to begin.
+            </p>
           ) : (
             <ul className="mt-4 space-y-1">
               {projects.map((p) => (
                 <li key={p.id}>
                   <button
                     onClick={() => selectProject(p)}
-                    className={`w-full rounded-sheet border px-3 py-2 text-left text-[15px] transition-colors ${
+                    aria-current={selected?.id === p.id ? "true" : undefined}
+                    className={`w-full rounded-sheet border px-3 py-2 text-left text-[15px] transition-colors duration-200 ${
                       selected?.id === p.id
                         ? "border-viridian bg-viridian-tint"
                         : "border-hairline bg-surface hover:border-graphite"
                     }`}
                   >
                     <span className="font-medium">{p.name}</span>
-                    <span className="ms-2 font-mono text-xs uppercase text-graphite">{p.space_type}</span>
+                    <span className="ms-2 font-mono text-xs uppercase text-graphite">
+                      {p.space_type}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -459,163 +678,264 @@ export default function ProjectsPage() {
 
           <form onSubmit={createProject} className="mt-8 space-y-3">
             <DimLine label="New project" />
-            <input className={inputCls} placeholder="Project name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} required />
-            <input className={inputCls} placeholder="Client (optional)" value={client} maxLength={200} onChange={(e) => setClient(e.target.value)} />
-            <select className={inputCls} value={spaceType} onChange={(e) => setSpaceType(e.target.value)}>
-              {SPACE_TYPES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <input
+              className={inputCls}
+              placeholder="Project name"
+              value={name}
+              maxLength={200}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+            <input
+              className={inputCls}
+              placeholder="Client (optional)"
+              value={client}
+              maxLength={200}
+              onChange={(e) => setClient(e.target.value)}
+            />
+            <label className="block">
+              <span className="sr-only">Space type</span>
+              <select
+                className={inputCls}
+                value={spaceType}
+                onChange={(e) => setSpaceType(e.target.value)}
+              >
+                {SPACE_TYPES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
             {createError ? <p className="text-sm text-thermal-text">{createError}</p> : null}
-            <button className="min-h-10 rounded-sheet bg-ink px-4 py-2 text-[15px] font-medium text-paper hover:bg-black">
+            <button className="min-h-10 rounded-sheet bg-ink px-4 py-2 text-[15px] font-medium text-paper transition-colors duration-200 hover:bg-black">
               Create project
             </button>
           </form>
-        </section>
 
-        {/* right: analysis flow */}
+          {/* History belongs beside the projects it describes, not inside the workspace. */}
+          {selected && history.length > 0 && (
+            <div data-testid="analysis-history" className="mt-8">
+              <DimLine label="Previous analyses" right={String(history.length)} />
+              <ul className="mt-3 space-y-1">
+                {history.map((h) => (
+                  <li key={h.id}>
+                    <button
+                      type="button"
+                      onClick={() => void openAnalysis(h)}
+                      aria-current={results?.analysisId === h.id ? "true" : undefined}
+                      className={`w-full rounded-sheet border px-3 py-2 text-left transition-colors duration-200 ${
+                        results?.analysisId === h.id
+                          ? "border-viridian bg-viridian-tint"
+                          : "border-hairline bg-surface hover:border-graphite"
+                      }`}
+                    >
+                      <span className="block font-mono text-[11px] uppercase tracking-[0.06em] text-graphite">
+                        {new Date(h.created_at).toLocaleString()}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-xs">
+                        {h.status}
+                        {h.report_language === "ar" ? " · AR" : ""}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </aside>
+
+        {/* ---------------------------------------------------------------- workspace */}
         <section>
           {!selected ? (
-            <div className="flex h-full min-h-64 items-center justify-center rounded-sheet border border-hairline">
-              <p className="text-graphite">Select or create a project to start an analysis.</p>
+            <div className="rounded-sheet border border-hairline bg-surface p-8 sm:p-12">
+              <div className="dim-line mb-6">
+                <span className="dim-label">Workspace</span>
+                <span className="dim-rule" />
+              </div>
+              <h2 className="max-w-lg font-serif text-[26px] leading-tight sm:text-[30px]">
+                Select a project, or create one, to start an analysis.
+              </h2>
+              <p className="mt-4 max-w-lg text-[15px] text-graphite">
+                Each project holds one venue and every analysis you run against it. You will
+                upload a floorplan, choose which decisions to improve, and receive zones, a
+                circulation heatmap, layout scenarios and a client-ready report.
+              </p>
             </div>
           ) : (
             <div className="space-y-8">
               <DimLine label={`Analysis · ${selected.name}`} right={status ?? "not started"} />
 
-              {history.length > 0 && (
-                <div data-testid="analysis-history">
-                  <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
-                    Previous analyses
-                  </span>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {history.map((h) => (
-                      <button
-                        key={h.id}
-                        type="button"
-                        onClick={() => void openAnalysis(h)}
-                        className={`min-h-10 rounded-sheet border px-3 py-1.5 text-left font-mono text-xs transition-colors ${
-                          results?.analysisId === h.id
-                            ? "border-viridian bg-viridian-tint text-viridian"
-                            : "border-hairline bg-surface hover:border-graphite"
-                        }`}
-                      >
-                        {new Date(h.created_at).toLocaleString()} · {h.status}
-                        {h.report_language === "ar" ? " · AR" : ""}
-                      </button>
-                    ))}
+              {/* ------------------------------------------------------ 1 · the inputs */}
+              {!finished && (
+                <div className="space-y-6">
+                  {!planId && !busy && (
+                    <p className="max-w-2xl text-[15px] text-graphite">
+                      Start by uploading the venue&apos;s floorplan. Footfall data is optional —
+                      without it, circulation is simulated rather than measured, and the report
+                      says which was used.
+                    </p>
+                  )}
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <UploadZone
+                      id="floorplan-upload"
+                      accept=".png,.jpg,.jpeg,.pdf"
+                      label="Floorplan"
+                      hint={`PNG · JPG · PDF, up to ${MAX_UPLOAD_MB} MB`}
+                      fileName={planName}
+                      onFile={(f) => void upload("floorplan", f)}
+                    />
+                    <UploadZone
+                      id="footfall-upload"
+                      accept=".csv"
+                      label="Footfall data"
+                      hint="CSV · zone_name, timestamp, traffic_count"
+                      fileName={footfallName}
+                      optional
+                      onFile={(f) => void upload("footfall", f)}
+                    />
+                  </div>
+
+                  {uploadErrors.length > 0 && (
+                    <ul
+                      role="alert"
+                      className="reveal rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal-text"
+                    >
+                      {uploadErrors.map((e, i) => (
+                        <li key={i}>{e}</li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <div>
+                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+                      What should this analysis improve?
+                    </span>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {OBJECTIVES.map((o) => {
+                        const on = objectives.includes(o.id);
+                        return (
+                          <button
+                            key={o.id}
+                            type="button"
+                            aria-label={o.label}
+                            aria-describedby={`obj-${o.id}-outcome`}
+                            aria-pressed={on}
+                            onClick={() =>
+                              setObjectives(
+                                on ? objectives.filter((x) => x !== o.id) : [...objectives, o.id],
+                              )
+                            }
+                            className={`rounded-sheet border p-3 text-left transition-colors duration-200 ${
+                              on
+                                ? "border-viridian bg-viridian-tint"
+                                : "border-hairline bg-surface hover:border-graphite"
+                            }`}
+                          >
+                            <span className="flex items-baseline justify-between gap-2">
+                              <span
+                                className={`text-[15px] font-medium ${on ? "text-viridian" : ""}`}
+                              >
+                                {o.label}
+                              </span>
+                              {/* Selection is carried by a word, not only by colour. */}
+                              <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-graphite">
+                                {on ? "On" : "Off"}
+                              </span>
+                            </span>
+                            <span
+                              id={`obj-${o.id}-outcome`}
+                              className="mt-1 block text-[13px] leading-snug text-graphite"
+                            >
+                              {o.outcome}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {objectives.length === 0 && (
+                      <p className="mt-2 text-[13px] text-thermal-text">
+                        Choose at least one objective.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* The language decision belongs next to the button that acts on it. */}
+                  <div className="rounded-sheet border border-hairline bg-surface p-4">
+                    <div className="flex flex-wrap items-end justify-between gap-4">
+                      <div>
+                        <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+                          Report language
+                        </span>
+                        <div className="mt-2 flex gap-2">
+                          {(["en", "ar"] as const).map((lang) => (
+                            <button
+                              key={lang}
+                              type="button"
+                              data-testid={`report-lang-${lang}`}
+                              aria-pressed={reportLanguage === lang}
+                              onClick={() => setReportLanguage(lang)}
+                              className={`min-h-10 rounded-sheet border px-3 py-1.5 text-sm transition-colors duration-200 ${
+                                reportLanguage === lang
+                                  ? "border-viridian bg-viridian-tint text-viridian"
+                                  : "border-hairline bg-surface hover:border-graphite"
+                              }`}
+                            >
+                              {lang === "en" ? "English" : "العربية"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-start gap-2">
+                        <button
+                          onClick={startAnalysis}
+                          disabled={!planId || objectives.length === 0 || busy}
+                          className="min-h-10 rounded-sheet bg-ink px-6 py-3 text-[15px] font-medium text-paper transition-colors duration-200 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {busy ? "Analyzing…" : "Generate insights"}
+                        </button>
+                        {!planId && !busy && (
+                          <span className="font-mono text-[11px] text-graphite">
+                            Upload a floorplan first
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
-                    Floorplan (PNG · JPG · PDF){planName ? ` · ${planName} ✓` : ""}
-                  </span>
-                  <input
-                    type="file"
-                    accept=".png,.jpg,.jpeg,.pdf"
-                    className="mt-2 block w-full text-sm"
-                    onChange={(e) => {
-                      const f = e.currentTarget.files?.[0];
-                      e.currentTarget.value = ""; // same-file re-pick must re-fire (finding #7)
-                      if (f) void upload("floorplan", f);
-                    }}
-                  />
-                </label>
-                <label className="block">
-                  <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
-                    Footfall CSV (optional){footfallName ? ` · ${footfallName} ✓` : ""}
-                  </span>
-                  <input
-                    type="file"
-                    accept=".csv"
-                    className="mt-2 block w-full text-sm"
-                    onChange={(e) => {
-                      const f = e.currentTarget.files?.[0];
-                      e.currentTarget.value = "";
-                      if (f) void upload("footfall", f);
-                    }}
-                  />
-                </label>
-              </div>
-
-              {uploadErrors.length > 0 && (
-                <ul className="rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal-text">
-                  {uploadErrors.map((e, i) => (
-                    <li key={i}>{e}</li>
-                  ))}
-                </ul>
-              )}
-
-              <div>
-                <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Objectives</span>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {OBJECTIVES.map((o) => {
-                    const on = objectives.includes(o.id);
-                    return (
-                      <button
-                        key={o.id}
-                        type="button"
-                        onClick={() =>
-                          setObjectives(on ? objectives.filter((x) => x !== o.id) : [...objectives, o.id])
-                        }
-                        className={`min-h-10 rounded-sheet border px-3 py-1.5 text-sm transition-colors ${
-                          on ? "border-viridian bg-viridian-tint text-viridian" : "border-hairline bg-surface"
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Report language</span>
-                <div className="mt-2 flex gap-2">
-                  {(["en", "ar"] as const).map((lang) => (
-                    <button
-                      key={lang}
-                      type="button"
-                      data-testid={`report-lang-${lang}`}
-                      onClick={() => setReportLanguage(lang)}
-                      className={`min-h-10 rounded-sheet border px-3 py-1.5 text-sm transition-colors ${
-                        reportLanguage === lang
-                          ? "border-viridian bg-viridian-tint text-viridian"
-                          : "border-hairline bg-surface"
-                      }`}
-                    >
-                      {lang === "en" ? "English" : "العربية"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                onClick={startAnalysis}
-                disabled={!planId || objectives.length === 0 || busy}
-                className="min-h-10 rounded-sheet bg-ink px-6 py-3 text-[15px] font-medium text-paper transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {busy ? "Analyzing…" : "Generate insights"}
-              </button>
-
               {(status === "rejected" || status === "failed") && analysisError && (
                 <p
                   data-testid="analysis-error"
-                  className="rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal-text"
+                  role="alert"
+                  className="reveal rounded-sheet border border-thermal/40 bg-surface p-3 text-sm text-thermal-text"
                 >
                   {analysisError}
                 </p>
               )}
 
+              {/* ---------------------------------------------------- 2 · in progress */}
+              {steps.length > 0 && (
+                <div className="reveal rounded-sheet border border-hairline bg-surface p-4 sm:p-5">
+                  <DimLine label="Analysis timeline" right={status ?? ""} />
+                  <Timeline steps={steps} status={status} />
+                </div>
+              )}
+
               {feed.length > 0 && (
-                <div>
-                  <DimLine label="Pipeline register" right={status ?? ""} />
-                  <ul className="mt-3 space-y-1 font-mono text-[13px] text-graphite">
+                <div className="rounded-sheet border border-hairline bg-surface p-4">
+                  {/* Deliberately not collapsed once the run ends. It is the honest record of
+                      what degraded — a missing render, a fallback provider — and hiding it
+                      the moment the analysis succeeds is how a silent downgrade stays silent. */}
+                  <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+                    Pipeline register
+                  </span>
+                  <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto font-mono text-[13px] text-graphite">
                     {feed.map((m, i) => (
-                      <li key={i} className="border-b border-hairline pb-1">
+                      <li key={i} className="border-b border-hairline pb-1 last:border-b-0">
                         {m}
                       </li>
                     ))}
@@ -623,121 +943,257 @@ export default function ProjectsPage() {
                 </div>
               )}
 
-              {steps.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {steps.map((s) => (
-                    <span
-                      key={s.name}
-                      className={`rounded-sheet border px-2 py-1 font-mono text-xs uppercase ${
-                        s.status === "done"
-                          ? "border-viridian text-viridian"
-                          : "border-thermal text-thermal-text"
-                      }`}
-                    >
-                      {s.name} · {s.status}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* ------------------------------------------------ 3 · decision summary */}
+              {finished && results && (
+                <div className="reveal rounded-sheet border border-viridian/30 bg-viridian-tint p-5 sm:p-6">
+                  <DimLine label="Decision summary" right={selected.space_type} />
 
-              {heatmapKey && results && (
-                <div>
-                  <DimLine label="Flow heatmap" right="cool → hot" />
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`${API}/analyses/${results.analysisId}/files/${heatmapKey}`}
-                    alt="Guest-flow heatmap over the uploaded floorplan"
-                    className="mt-3 w-full rounded-sheet border border-hairline"
-                  />
-                </div>
-              )}
+                  {best ? (
+                    <>
+                      <h2 className="mt-4 max-w-3xl font-serif text-[24px] leading-tight sm:text-[28px]">
+                        {best.name}
+                      </h2>
+                      <p className="mt-2 max-w-3xl text-[15px] text-graphite">
+                        {best.moves[0]?.description}
+                        {best.moves[0]?.rationale ? ` — ${best.moves[0].rationale}` : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-4 text-[15px] text-graphite">
+                      The analysis finished. The evidence below is ready to review.
+                    </p>
+                  )}
 
-              {results && results.flowScore !== null && (
-                <div data-testid="flow-score">
-                  <DimLine label="Flow efficiency score" right="0 – 100" />
-                  <p className="mt-3 font-serif text-[40px] leading-none text-viridian">
-                    {results.flowScore}
-                  </p>
-                  <p className="mt-1 text-sm text-graphite">
-                    Area-weighted flow intensity across guest-facing zones. Assumptions
-                    ship with the report.
-                  </p>
-                </div>
-              )}
-
-              {results && results.scenarios.length > 0 && (
-                <div data-testid="scenarios">
-                  <DimLine label="Layout scenarios" right={`${results.scenarios.length}`} />
-                  <div className="mt-3 space-y-3">
-                    {results.scenarios.map((s) => (
-                      <div key={s.id} className="rounded-sheet border border-hairline bg-surface p-4">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <h3 className="font-medium">{s.name}</h3>
-                          <span className="whitespace-nowrap font-mono text-xs uppercase text-graphite">
-                            confidence {Math.round(s.confidence * 100)}%
-                          </span>
-                        </div>
-                        <p
-                          data-testid="solver-verdict"
-                          className={`mt-1 font-mono text-[11px] uppercase tracking-[0.08em] ${
-                            s.solver_feasible ? "text-viridian" : "text-thermal-text"
-                          }`}
-                          title={(s.solver_notes ?? []).join("\n")}
-                        >
-                          {s.solver_feasible
-                            ? "✓ fits the floor area (constraint solver)"
-                            : "✕ does not fit as proposed (constraint solver)"}
-                        </p>
-                        <ul className="mt-2 space-y-2">
-                          {s.moves.map((m, i) => (
-                            <li key={i} className="text-sm">
-                              <span className="font-medium">{m.description}</span>
-                              <span className="text-graphite"> — {m.rationale}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {Object.entries(s.predicted_effects).map(([k, v]) => (
-                            <span
-                              key={k}
-                              className="rounded-sheet border border-viridian px-2 py-1 font-mono text-xs text-viridian"
-                            >
-                              {k}: {v}
-                            </span>
-                          ))}
-                        </div>
+                  <dl className="mt-5 flex flex-wrap gap-x-10 gap-y-4">
+                    {results.flowScore !== null && (
+                      <div data-testid="flow-score">
+                        <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-graphite">
+                          Flow efficiency
+                        </dt>
+                        <dd className="mt-1">
+                          {/* The score stands alone in this <p>: the browser test reads its
+                              text and parses it as a number, so a suffix inside it would
+                              turn a passing assertion into NaN. */}
+                          <p className="font-serif text-[34px] leading-none text-viridian">
+                            {results.flowScore}
+                          </p>
+                          <span className="font-mono text-[11px] text-graphite">out of 100</span>
+                        </dd>
                       </div>
-                    ))}
+                    )}
+                    {best && (
+                      <div>
+                        <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-graphite">
+                          Confidence
+                        </dt>
+                        <dd className="mt-1 font-serif text-[34px] leading-none">
+                          {Math.round(best.confidence * 100)}%
+                        </dd>
+                      </div>
+                    )}
+                    {best && (
+                      <div>
+                        <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-graphite">
+                          Physically fits
+                        </dt>
+                        <dd className="mt-1 font-serif text-[34px] leading-none">
+                          {best.solver_feasible ? "Yes" : "No"}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+
+                  <p className="mt-5 max-w-2xl text-[14px] text-graphite">
+                    Area-weighted flow intensity across guest-facing zones. Every assumption
+                    behind these numbers is printed in the report.
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-3">
+                    <a
+                      href="#evidence"
+                      className="rounded-sheet border border-viridian px-4 py-2 text-[14px] text-viridian transition-colors duration-200 hover:bg-viridian hover:text-paper"
+                    >
+                      Review the evidence
+                    </a>
+                    <span className="text-[14px] text-graphite">
+                      Then download the report, or send a client link.
+                    </span>
                   </div>
                 </div>
               )}
 
-              {results?.reportReady && (
-                <a
-                  data-testid="report-download"
-                  href={`${API}/analyses/${results.analysisId}/report`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block min-h-10 rounded-sheet bg-viridian px-6 py-3 text-[15px] font-medium text-paper transition-opacity hover:opacity-90"
-                >
-                  Download insight report (PDF)
-                </a>
+              {/* --------------------------------------------------------- 4 · evidence */}
+              {results && (heatmapKey || results.scenarios.length > 0 || results.moodboard) && (
+                <div id="evidence" className="space-y-8 scroll-mt-8">
+                  {heatmapKey && (
+                    <section className="reveal reveal-1">
+                      <DimLine label="Flow heatmap" right="cool → hot" />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`${API}/analyses/${results.analysisId}/files/${heatmapKey}`}
+                        alt="Guest-flow heatmap over the uploaded floorplan"
+                        className="mt-3 w-full rounded-sheet border border-hairline"
+                      />
+                      <p className="mt-2 text-[14px] text-graphite">
+                        Warmer areas carry more simulated guest traffic. Bottlenecks and dead
+                        zones are called out in the report.
+                      </p>
+                    </section>
+                  )}
+
+                  {results.scenarios.length > 0 && (
+                    <section data-testid="scenarios" className="reveal reveal-2">
+                      <DimLine label="Layout scenarios" right={`${results.scenarios.length}`} />
+                      <div className="mt-3 space-y-3">
+                        {results.scenarios.map((s) => (
+                          <article
+                            key={s.id}
+                            className={`rounded-sheet border bg-surface p-4 transition-colors duration-200 ${
+                              best?.id === s.id ? "border-viridian" : "border-hairline"
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-baseline justify-between gap-3">
+                              <h3 className="font-medium">
+                                {s.name}
+                                {best?.id === s.id ? (
+                                  <span className="ms-2 rounded-sheet border border-viridian px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-viridian">
+                                    Recommended
+                                  </span>
+                                ) : null}
+                              </h3>
+                              <span className="whitespace-nowrap font-mono text-xs uppercase text-graphite">
+                                confidence {Math.round(s.confidence * 100)}%
+                              </span>
+                            </div>
+
+                            <p
+                              data-testid="solver-verdict"
+                              className={`mt-2 text-[13px] ${
+                                s.solver_feasible ? "text-viridian" : "text-thermal-text"
+                              }`}
+                              title={(s.solver_notes ?? []).join("\n")}
+                            >
+                              {s.solver_feasible
+                                ? "✓ Fits the available floor area — checked by the constraint solver"
+                                : "✕ Does not fit as proposed — the constraint solver rejected it against the usable area"}
+                            </p>
+
+                            <ul className="mt-3 space-y-2">
+                              {s.moves.map((m, i) => (
+                                <li key={i} className="text-sm">
+                                  <span className="font-medium">{m.description}</span>
+                                  <span className="text-graphite"> — {m.rationale}</span>
+                                </li>
+                              ))}
+                            </ul>
+
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {Object.entries(s.predicted_effects).map(([k, v]) => (
+                                <span
+                                  key={k}
+                                  className="rounded-sheet border border-viridian px-2 py-1 font-mono text-xs text-viridian"
+                                >
+                                  {k.replace(/_/g, " ")}: {v}
+                                </span>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {results.moodboard && (
+                    <section data-testid="moodboard" className="reveal reveal-3">
+                      <DimLine label="Design direction" right={results.moodboard.style_name} />
+                      {(results.moodboard.image_keys ?? []).length > 0 && (
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                          {results.moodboard.image_keys.map((key) => (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              key={key}
+                              data-testid="moodboard-render"
+                              src={`${API}/analyses/${results.analysisId}/files/${key}`}
+                              alt={`${results.moodboard!.style_name} interior render`}
+                              className="aspect-square w-full rounded-sheet border border-hairline object-cover"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {results.moodboard.renders_are_draft && (
+                        <p
+                          data-testid="moodboard-draft-note"
+                          className="mt-2 font-mono text-[11px] uppercase tracking-wide text-graphite"
+                        >
+                          Draft renders
+                          {results.moodboard.render_provider
+                            ? ` · ${results.moodboard.render_provider}`
+                            : ""}{" "}
+                          — mood and material direction, not final visuals
+                        </p>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        {results.moodboard.palette.map((hex) => (
+                          <div key={hex} className="flex-1">
+                            <div
+                              className="h-14 rounded-sheet border border-hairline"
+                              style={{ backgroundColor: hex }}
+                            />
+                            <p className="mt-1 font-mono text-[11px] uppercase text-graphite">
+                              {hex}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-sm">
+                        <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">
+                          Materials ·{" "}
+                        </span>
+                        {results.moodboard.materials.join(", ")}
+                      </p>
+                      {results.moodboard.lighting_concept && (
+                        <p className="mt-1 text-sm text-graphite">
+                          {results.moodboard.lighting_concept}
+                        </p>
+                      )}
+                    </section>
+                  )}
+                </div>
               )}
 
+              {/* ------------------------------------------------------- 5 · delivery */}
               {results?.reportReady && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    data-testid="share-report"
-                    onClick={() => void shareReport(results.analysisId)}
-                    className="min-h-10 rounded-sheet border border-hairline px-5 py-2.5 text-[14px] transition-colors hover:border-viridian"
-                  >
-                    {shareState.status === "working" ? "Creating link…" : "Copy client link"}
-                  </button>
+                <section className="reveal rounded-sheet border border-hairline bg-surface p-4 sm:p-5">
+                  <DimLine label="Deliver to the client" />
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <a
+                      data-testid="report-download"
+                      href={`${API}/analyses/${results.analysisId}/report`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block min-h-10 rounded-sheet bg-viridian px-6 py-3 text-[15px] font-medium text-paper transition-opacity duration-200 hover:opacity-90"
+                    >
+                      Download insight report (PDF)
+                    </a>
+                    <button
+                      type="button"
+                      data-testid="share-report"
+                      onClick={() => void shareReport(results.analysisId)}
+                      className="min-h-10 rounded-sheet border border-hairline px-5 py-2.5 text-[14px] transition-colors duration-200 hover:border-viridian"
+                    >
+                      {shareState.status === "working" ? "Creating link…" : "Copy client link"}
+                    </button>
+                  </div>
+
+                  <p className="mt-3 max-w-2xl text-[13px] text-graphite">
+                    A client link opens the report without an account and expires on its own.
+                  </p>
+
                   {shareState.status === "ready" && (
                     <p
                       data-testid="share-link"
-                      className="mt-2 break-all font-mono text-[11px] text-graphite"
+                      role="status"
+                      className="reveal mt-3 break-all rounded-sheet border border-viridian bg-viridian-tint px-3 py-2 font-mono text-[11px] text-viridian"
                     >
                       {shareState.message}
                     </p>
@@ -745,61 +1201,13 @@ export default function ProjectsPage() {
                   {shareState.status === "error" && (
                     <p
                       data-testid="share-error"
-                      className="mt-2 font-mono text-[11px] text-thermal"
+                      role="alert"
+                      className="reveal mt-3 font-mono text-[11px] text-thermal"
                     >
                       {shareState.message}
                     </p>
                   )}
-                </div>
-              )}
-
-              {results?.moodboard && (
-                <div data-testid="moodboard">
-                  <DimLine label="Moodboard" right={results.moodboard.style_name} />
-                  {(results.moodboard.image_keys ?? []).length > 0 && (
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      {results.moodboard.image_keys.map((key) => (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img
-                          key={key}
-                          data-testid="moodboard-render"
-                          src={`${API}/analyses/${results.analysisId}/files/${key}`}
-                          alt={`${results.moodboard!.style_name} interior render`}
-                          className="aspect-square w-full rounded-sheet border border-hairline object-cover"
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {results.moodboard.renders_are_draft && (
-                    <p
-                      data-testid="moodboard-draft-note"
-                      className="mt-2 font-mono text-[11px] uppercase tracking-wide text-graphite"
-                    >
-                      Draft renders{results.moodboard.render_provider
-                        ? ` · ${results.moodboard.render_provider}`
-                        : ""}{" "}
-                      — mood and material direction, not final visuals
-                    </p>
-                  )}
-                  <div className="mt-3 flex gap-2">
-                    {results.moodboard.palette.map((hex) => (
-                      <div key={hex} className="flex-1">
-                        <div
-                          className="h-14 rounded-sheet border border-hairline"
-                          style={{ backgroundColor: hex }}
-                        />
-                        <p className="mt-1 font-mono text-[11px] uppercase text-graphite">{hex}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-sm">
-                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-graphite">Materials · </span>
-                    {results.moodboard.materials.join(", ")}
-                  </p>
-                  {results.moodboard.lighting_concept && (
-                    <p className="mt-1 text-sm text-graphite">{results.moodboard.lighting_concept}</p>
-                  )}
-                </div>
+                </section>
               )}
             </div>
           )}
