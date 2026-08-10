@@ -11,7 +11,11 @@ export default defineConfig({
   retries: 0,
   workers: 1, // scenarios share the dev database — run serially
   use: {
-    baseURL: "http://localhost:3000",
+    // Overridable so the same suite can run against a real deployment. The compose
+    // stack publishes no host port — everything reaches it through the tunnel — so
+    // testing the deployed thing means pointing at its public URL:
+    //   E2E_BASE_URL=https://app.totalkapp.com npx playwright test
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     channel: "chrome", // reuse the system Chrome, no browser download
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
