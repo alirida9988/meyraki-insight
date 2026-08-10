@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schem
 
 from . import auth as auth_mod
 from . import sharing
-from . import footfall, ratelimit, settings, storage, version
+from . import footfall, imaging, ratelimit, settings, storage, version
 from .db import SessionLocal, get_session, init_db
 from .models import Analysis, CostEntry, Event, Org, Project, StepRun, Upload, User
 from .pipeline import STEP_NAMES, run_analysis
@@ -73,6 +73,19 @@ class RegisterIn(BaseModel):
     email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=auth_mod.MIN_PASSWORD_LEN, max_length=200)
     org_name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def strip_email(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("org_name")
+    @classmethod
+    def require_org_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Organization name cannot be blank.")
+        return value
 
 
 class LoginIn(BaseModel):
@@ -172,6 +185,21 @@ class ProjectIn(BaseModel):
     client_name: str | None = None
     space_type: SpaceType = SpaceType.OTHER
 
+    @field_validator("name")
+    @classmethod
+    def require_project_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Project name cannot be blank.")
+        return value
+
+    @field_validator("client_name")
+    @classmethod
+    def normalize_client_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
 
 @app.post("/projects", status_code=201)
 def create_project(
@@ -250,7 +278,7 @@ async def upload_file(
                 422, "Floorplan must be PNG, JPG, or PDF. DWG support arrives in Phase 2."
             )
         # Trust boundary: verify contents, never the client-supplied content type.
-        if not data.startswith(settings.FLOORPLAN_MAGIC):
+        if not data.startswith(settings.FLOORPLAN_MAGIC) or not imaging.valid_floorplan(data):
             raise HTTPException(
                 422, "File contents are not a valid PNG, JPG, or PDF — re-export and try again."
             )

@@ -27,8 +27,9 @@ from app import version
 from app.db import SessionLocal
 from app.main import app
 from app.models import Analysis
+from conftest import VALID_PNG
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = VALID_PNG
 
 
 @pytest.fixture(autouse=True)

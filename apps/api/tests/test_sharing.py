@@ -17,9 +17,10 @@ from fastapi.testclient import TestClient
 
 from app import sharing
 from app.main import app
+from conftest import VALID_PNG
 
 SECRET = "test-share-secret-long-and-random"
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = VALID_PNG
 
 
 @pytest.fixture(autouse=True)

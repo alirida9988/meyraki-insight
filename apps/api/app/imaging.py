@@ -27,6 +27,30 @@ def is_pdf(data: bytes) -> bool:
     return data[:5] == b"%PDF-"
 
 
+def valid_floorplan(data: bytes) -> bool:
+    """Whether uploaded bytes are a readable supported floorplan format.
+
+    A magic-byte check alone accepts a truncated or otherwise corrupt PNG/PDF.
+    That lets an upload look successful, only for the first paid agent call (or the
+    heatmap renderer) to fail much later.  Validate at the upload boundary instead.
+    """
+    if is_pdf(data):
+        return rasterize_pdf(data) is not None
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format not in {"PNG", "JPEG"}:
+                return False
+            # verify() catches truncated/corrupt image streams without retaining a
+            # decoded bitmap in memory.  The image is reopened because Pillow makes
+            # it unusable after verification.
+            image.verify()
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+        return True
+    except Exception:
+        return False
+
+
 def normalize_raster(data: bytes) -> bytes:
     """RGB, within MAX_EDGE, within MAX_ENCODED_BYTES. Untouched when already fine."""
     with Image.open(io.BytesIO(data)) as img:

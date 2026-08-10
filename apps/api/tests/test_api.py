@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from conftest import VALID_PNG
 
 GOOD_CSV = (
     b"zone_name,timestamp,traffic_count\n"
@@ -17,6 +18,7 @@ GOOD_CSV = (
 )
 BAD_CSV = b"zone,when,count\nLobby,yesterday,many\n"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = VALID_PNG
 
 
 @pytest.fixture(scope="module")
@@ -56,11 +58,24 @@ def test_floorplan_rejects_wrong_type(client, project_id):
     assert r.status_code == 422
 
 
+def test_floorplan_rejects_corrupt_bytes_with_a_valid_signature(client, project_id):
+    r = client.post(
+        f"/projects/{project_id}/uploads",
+        params={"kind": "floorplan"},
+        files={"file": ("corrupt.png", PNG_MAGIC, "image/png")},
+    )
+    assert r.status_code == 422
+
+
+def test_project_rejects_whitespace_only_name(client):
+    assert client.post("/projects", json={"name": "   ", "space_type": "hotel"}).status_code == 422
+
+
 def test_full_pipeline_runs_to_done(client, project_id):
     plan = client.post(
         f"/projects/{project_id}/uploads",
         params={"kind": "floorplan"},
-        files={"file": ("plan.png", PNG_MAGIC, "image/png")},
+        files={"file": ("plan.png", PNG, "image/png")},
     ).json()
     ff = client.post(
         f"/projects/{project_id}/uploads",
@@ -105,7 +120,7 @@ def test_analysis_accepts_report_language(client, project_id):
     plan = client.post(
         f"/projects/{project_id}/uploads",
         params={"kind": "floorplan"},
-        files={"file": ("p.png", PNG_MAGIC, "image/png")},
+        files={"file": ("p.png", PNG, "image/png")},
     ).json()
     r = client.post(
         f"/projects/{project_id}/analyses",

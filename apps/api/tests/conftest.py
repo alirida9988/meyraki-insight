@@ -1,5 +1,6 @@
 """Test environment — set BEFORE any app import, for every test module."""
 
+import base64
 import os
 from pathlib import Path
 
@@ -18,3 +19,9 @@ os.environ["MEYRAKI_ALLOWED_EMAILS"] = ""
 # module imports app.db and opens a pooled connection) — deleting the file
 # later makes SQLite report 'readonly database' on the stale handles.
 Path("test_meyraki.db").unlink(missing_ok=True)
+
+# A real 1×1 PNG for route tests.  Signature-only stand-ins mask corrupt-upload
+# regressions because Pillow (and a real vision provider) cannot decode them.
+VALID_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8//8/AwMDEwMDAwMDAwAkBgMB/DXemwAAAABJRU5ErkJggg=="
+)

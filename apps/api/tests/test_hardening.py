@@ -17,8 +17,9 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import Analysis
 from app.pipeline import STALE_AFTER
+from conftest import VALID_PNG
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = VALID_PNG
 CSV = b"zone_name,timestamp,traffic_count\nLobby,2025-04-20 08:00,120\n"
 
 

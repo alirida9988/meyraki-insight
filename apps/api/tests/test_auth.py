@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 
 from app import ratelimit
 from app.main import app
+from conftest import VALID_PNG
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = VALID_PNG
 
 
 def _register(c: TestClient, email: str, org: str) -> None:
@@ -45,6 +46,7 @@ def test_register_validation():
     with TestClient(app) as c:
         assert c.post("/auth/register", json={"email": "not-an-email", "password": "long-enough-1", "org_name": "X"}).status_code == 422
         assert c.post("/auth/register", json={"email": "a@b.co", "password": "short", "org_name": "X"}).status_code == 422
+        assert c.post("/auth/register", json={"email": "blank-org@t.dev", "password": "long-enough-1", "org_name": "   "}).status_code == 422
         _register(c, "dup@t.dev", "X")
         assert c.post("/auth/register", json={"email": "dup@t.dev", "password": "long-enough-1", "org_name": "Y"}).status_code == 409
 

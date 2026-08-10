@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app import costs
+from conftest import VALID_PNG
 
 
 def test_prices_match_the_documented_rate_card():
@@ -121,7 +122,7 @@ from app.db import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Analysis, CostEntry, Event  # noqa: E402
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = VALID_PNG
 
 
 @pytest.fixture(scope="module")
