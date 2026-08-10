@@ -1,0 +1,54 @@
+# Cloudflare Tunnel overlay: a public HTTPS URL with no server and no open ports.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#
+# Use this INSTEAD of docker-compose.prod.yml, not alongside it. Cloudflare terminates TLS
+# at its edge, so Caddy would be a second terminator doing nothing — and the two would
+# disagree about which one owns the certificate.
+#
+# The tunnel dials OUT to Cloudflare and holds the connection open, so nothing listens on
+# a public interface and no firewall rule or port forward is needed. That is the security
+# story as much as the cost story: there is no inbound surface to scan.
+#
+# What it does NOT give you is a server. The machine running this has to be awake for the
+# link to work, which is fine for demos and pilots and is not a production host.
+#
+# Setup, once:
+#   1. Cloudflare dashboard -> Zero Trust -> Networks -> Tunnels -> Create a tunnel
+#   2. Name it `meyraki`, choose Docker, and copy the token it shows
+#   3. Put that token in .env as MEYRAKI_TUNNEL_TOKEN
+#   4. Under Public Hostnames, add two:
+#        app.totalkapp.com  ->  HTTP  ->  web:3000
+#        api.totalkapp.com  ->  HTTP  ->  api:8000
+#      Those are compose service names: the tunnel container resolves them over the
+#      compose network, which is why nothing needs publishing to the host at all.
+
+services:
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${MEYRAKI_TUNNEL_TOKEN:?create a tunnel in Cloudflare Zero Trust and put its token in .env}
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  api:
+    environment:
+      # Cloudflare terminates TLS, so the browser is on HTTPS even though the API speaks
+      # plain HTTP to the tunnel. Without this the session cookie ships without Secure.
+      MEYRAKI_HTTPS: "1"
+      # cloudflared forwards the visitor's address; without this every request looks like
+      # it came from the tunnel and one visitor exhausts everyone's rate limit.
+      MEYRAKI_TRUST_PROXY: "1"
+      MEYRAKI_WEB_ORIGINS: https://${APP_DOMAIN:?set APP_DOMAIN in .env, e.g. app.totalkapp.com}
+
+  web:
+    build:
+      args:
+        # Baked into the browser bundle at build time — the URL the BROWSER uses, so it
+        # must be the public tunnel hostname, never a compose service name.
+        NEXT_PUBLIC_API_URL: https://${API_DOMAIN:?set API_DOMAIN in .env, e.g. api.totalkapp.com}
