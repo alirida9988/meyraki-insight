@@ -15,3 +15,7 @@ apps/web/e2e/results-*.png
 apps/api/test_meyraki.db
 apps/api/var/
 artifacts/
+
+# SQLite databases created by the offline test suite (conftest deletes and recreates it)
+test_meyraki.db
+*.db-journal
