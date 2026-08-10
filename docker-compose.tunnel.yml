@@ -1,9 +1,10 @@
 # Cloudflare Tunnel overlay: a public HTTPS URL with no server and no open ports.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#   GIT_SHA=$(git rev-parse --short HEAD) \
+#     docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
 #
 # Use this INSTEAD of docker-compose.prod.yml, not alongside it. Cloudflare terminates TLS
-# at its edge, so Caddy would be a second terminator doing nothing — and the two would
+# at its edge, so Caddy would be a second terminator doing nothing, and the two would
 # disagree about which one owns the certificate.
 #
 # The tunnel dials OUT to Cloudflare and holds the connection open, so nothing listens on
@@ -11,24 +12,32 @@
 # story as much as the cost story: there is no inbound surface to scan.
 #
 # What it does NOT give you is a server. The machine running this has to be awake for the
-# link to work, which is fine for demos and pilots and is not a production host.
+# link to work — fine for demos and pilots, and not a production host.
 #
 # Setup, once:
-#   1. Cloudflare dashboard -> Zero Trust -> Networks -> Tunnels -> Create a tunnel
-#   2. Name it `meyraki`, choose Docker, and copy the token it shows
-#   3. Put that token in .env as MEYRAKI_TUNNEL_TOKEN
-#   4. Under Public Hostnames, add two:
-#        app.totalkapp.com  ->  HTTP  ->  web:3000
-#        api.totalkapp.com  ->  HTTP  ->  api:8000
-#      Those are compose service names: the tunnel container resolves them over the
-#      compose network, which is why nothing needs publishing to the host at all.
+#   cloudflared tunnel login                       # browser, picks the domain
+#   cloudflared tunnel create meyraki              # or reuse an existing one
+#   cloudflared tunnel token --cred-file ~/.cloudflared/meyraki.json <name>
+#   cloudflared tunnel route dns <name> app.yourdomain.com
+#   cloudflared tunnel route dns <name> api.yourdomain.com
+# then point MEYRAKI_TUNNEL_CREDENTIALS at that json file in .env.
+#
+# Routing lives in deploy/cloudflared.yml — in the repository, not in a dashboard screen.
 
 services:
   tunnel:
     image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${MEYRAKI_TUNNEL_TOKEN:?create a tunnel in Cloudflare Zero Trust and put its token in .env}
+    command: tunnel --config /etc/cloudflared/config.yml run
+    # Run as the user that owns the credentials file. The image's own non-root user cannot
+    # read a 0600 file owned by someone else, and the failure is a bare "permission denied"
+    # that looks like a bad mount path. The alternative — loosening the key to 0644 — makes
+    # a tunnel's private credentials world-readable to fix a container's uid, which is the
+    # wrong trade.
+    user: "${MEYRAKI_UID:-1000}:${MEYRAKI_GID:-1000}"
+    volumes:
+      - ./deploy/cloudflared.yml:/etc/cloudflared/config.yml:ro
+      # The tunnel's private key. Kept outside the repository and mounted read-only.
+      - ${MEYRAKI_TUNNEL_CREDENTIALS:?path to the tunnel credentials json, see the header}:/etc/cloudflared/credentials.json:ro
     depends_on:
       api:
         condition: service_healthy
@@ -37,6 +46,8 @@ services:
     restart: unless-stopped
 
   api:
+    # No host port: reached only through the tunnel, over the Compose network.
+    ports: !override []
     environment:
       # Cloudflare terminates TLS, so the browser is on HTTPS even though the API speaks
       # plain HTTP to the tunnel. Without this the session cookie ships without Secure.
@@ -45,10 +56,14 @@ services:
       # it came from the tunnel and one visitor exhausts everyone's rate limit.
       MEYRAKI_TRUST_PROXY: "1"
       MEYRAKI_WEB_ORIGINS: https://${APP_DOMAIN:?set APP_DOMAIN in .env, e.g. app.totalkapp.com}
+      # Registration is closed to these addresses. A public URL with open signup hands an
+      # account to anyone who finds it, and every analysis spends the owner's credits.
+      MEYRAKI_ALLOWED_EMAILS: ${MEYRAKI_ALLOWED_EMAILS:-}
 
   web:
+    ports: !override []
     build:
       args:
         # Baked into the browser bundle at build time — the URL the BROWSER uses, so it
-        # must be the public tunnel hostname, never a compose service name.
+        # must be the public tunnel hostname, never a Compose service name.
         NEXT_PUBLIC_API_URL: https://${API_DOMAIN:?set API_DOMAIN in .env, e.g. api.totalkapp.com}

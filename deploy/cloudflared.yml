@@ -1,0 +1,36 @@
+# Tunnel ingress for the Compose deployment.
+#
+# Mounted into the cloudflared container by docker-compose.tunnel.yml. The services are
+# named `web` and `api` because the tunnel resolves them over the Compose network — which
+# is why nothing has to be published to the host at all.
+#
+# Locally-managed rather than token-managed on purpose. A `--token` tunnel takes its
+# routing from Cloudflare's dashboard, so the ingress rules live in a UI: not diffable,
+# not reviewable, and not reproducible on another machine. Here they are in the repository
+# next to everything else.
+
+tunnel: e5390c6c-48fe-4600-884d-bab62b4d772e
+credentials-file: /etc/cloudflared/credentials.json
+
+# No metrics server and no autoupdate: this runs under Compose's restart policy, and a
+# self-updating binary swapping itself out underneath a running deployment is a surprise
+# nobody asked for.
+no-autoupdate: true
+
+ingress:
+  - hostname: api.totalkapp.com
+    service: http://api:8000
+    originRequest:
+      connectTimeout: 30s
+      # A full analysis makes several model calls and the report is a few megabytes; the
+      # default would cut a client off mid-download.
+      noHappyEyeballs: true
+
+  - hostname: app.totalkapp.com
+    service: http://web:3000
+    originRequest:
+      connectTimeout: 30s
+
+  # Anything else that resolves here is refused outright rather than quietly served
+  # something it was never meant to reach.
+  - service: http_status:404

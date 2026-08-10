@@ -522,6 +522,20 @@ def share_report(
     return {"url": str(request.base_url).rstrip("/") + path, "expires_at": expires_at}
 
 
+# Every response below carries client data — a floorplan, a heatmap, a priced report.
+# Putting a CDN in front of the API turned that into a leak: Cloudflare treats a URL
+# ending in .pdf as a static asset, cached it for four hours, and served it to anyone
+# who asked, while the origin itself correctly answered 401. The origin was right and
+# still the document got out, because nothing told the edge the bytes were private.
+#
+# `private` forbids shared caches, `no-store` forbids writing it down at all, and
+# `max-age=0` covers intermediaries that honour only the older directive.
+NO_STORE = {
+    "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+    "Pragma": "no-cache",
+}
+
+
 @app.get("/shared/reports/{analysis_id}")
 def shared_report(
     analysis_id: str,
@@ -555,7 +569,8 @@ def shared_report(
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="meyraki-report-{analysis_id[:8]}.pdf"'},
+        headers={**NO_STORE,
+                 "Content-Disposition": f'inline; filename="meyraki-report-{analysis_id[:8]}.pdf"'},
     )
 
 
@@ -577,7 +592,8 @@ def download_report(
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="meyraki-insight-{analysis_id[:8]}.pdf"'},
+        headers={**NO_STORE,
+                 "Content-Disposition": f'inline; filename="meyraki-insight-{analysis_id[:8]}.pdf"'},
     )
 
 
@@ -623,7 +639,9 @@ def get_file(
         ".jpeg": "image/jpeg",
         ".pdf": "application/pdf",
     }.get(Path(key).suffix.lower(), "application/octet-stream")
-    return Response(content=data, media_type=media)
+    # Heatmaps and renders are as private as the report they illustrate, and this route
+    # serves .png and .pdf — the extensions a CDN caches most eagerly.
+    return Response(content=data, media_type=media, headers=NO_STORE)
 
 
 @app.get("/analyses/{analysis_id}/events")
