@@ -56,7 +56,7 @@ def test_unauthenticated_requests_rejected():
         assert c.get("/analyses/whatever").status_code == 401
         assert c.get("/analyses/x/files/whatever.png").status_code == 401
         assert c.get("/analyses/x/events").status_code == 401
-        assert c.get("/analyses/x/report.pdf").status_code == 401
+        assert c.get("/analyses/x/report").status_code == 401
 
 
 def test_org_isolation_end_to_end(alice, bob):
@@ -80,7 +80,7 @@ def test_org_isolation_end_to_end(alice, bob):
     assert bob.get(f"/analyses/{analysis['id']}").status_code == 404
     assert bob.post(f"/analyses/{analysis['id']}/resume").status_code == 404
     assert bob.get(f"/analyses/{analysis['id']}/events").status_code == 404
-    assert bob.get(f"/analyses/{analysis['id']}/report.pdf").status_code == 404
+    assert bob.get(f"/analyses/{analysis['id']}/report").status_code == 404
     # Alice still sees her own
     assert alice.get(f"/analyses/{analysis['id']}").status_code == 200
 

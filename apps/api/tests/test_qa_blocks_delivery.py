@@ -118,6 +118,6 @@ def test_the_owner_may_still_download_their_own_failed_report(client):
     """Deliberately allowed: the studio owns the data and needs to see what went wrong.
     The line is drawn at delivery to a client, not at access by the author."""
     aid = _analysis_with_report(client, "failed")
-    r = client.get(f"/analyses/{aid}/report.pdf")
+    r = client.get(f"/analyses/{aid}/report")
     assert r.status_code == 200
     assert r.content.startswith(b"%PDF-")

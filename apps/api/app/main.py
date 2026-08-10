@@ -574,7 +574,12 @@ def shared_report(
     )
 
 
-@app.get("/analyses/{analysis_id}/report.pdf")
+# Deliberately NOT ".pdf". A CDN's default rules cache by file extension, and this route
+# returns one client's priced report: Cloudflare cached it for four hours and served it to
+# anonymous callers while the origin correctly answered 401. The Cache-Control headers
+# below are the real fix, but an extension that invites a static-asset heuristic is a trap
+# to walk around rather than to keep defusing.
+@app.get("/analyses/{analysis_id}/report")
 def download_report(
     analysis_id: str,
     session: Session = Depends(get_session),

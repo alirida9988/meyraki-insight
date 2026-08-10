@@ -229,6 +229,6 @@ def test_download_report_missing_file_404(client, project_id):
             if step.name == "report":
                 step.output = {"report_key": "deadbeef00.pdf", "language": "en", "sections": []}
         s.commit()
-    r = client.get(f"/analyses/{aid}/report.pdf")
+    r = client.get(f"/analyses/{aid}/report")
     assert r.status_code == 404
     assert "no longer available" in r.json()["detail"]

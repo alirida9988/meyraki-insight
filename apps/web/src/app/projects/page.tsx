@@ -715,7 +715,7 @@ export default function ProjectsPage() {
               {results?.reportReady && (
                 <a
                   data-testid="report-download"
-                  href={`${API}/analyses/${results.analysisId}/report.pdf`}
+                  href={`${API}/analyses/${results.analysisId}/report`}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-block min-h-10 rounded-sheet bg-viridian px-6 py-3 text-[15px] font-medium text-paper transition-opacity hover:opacity-90"

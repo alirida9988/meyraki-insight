@@ -77,7 +77,7 @@ def _assert_uncacheable(response, where: str):
 
 def test_the_owners_report_download_is_not_cacheable(client, analysis):
     aid, _ = analysis
-    r = client.get(f"/analyses/{aid}/report.pdf")
+    r = client.get(f"/analyses/{aid}/report")
     assert r.status_code == 200
     _assert_uncacheable(r, "the authenticated report download")
 
@@ -105,4 +105,4 @@ def test_heatmaps_and_renders_are_not_cacheable(client, analysis):
 def test_the_route_still_refuses_a_stranger(analysis):
     """The header is a second line, never the first: authorisation must still hold."""
     aid, _ = analysis
-    assert TestClient(app).get(f"/analyses/{aid}/report.pdf").status_code == 401
+    assert TestClient(app).get(f"/analyses/{aid}/report").status_code == 401
