@@ -20,6 +20,7 @@ dependencies = [
     "jupedsim>=1.4",  # LGPL-3.0, unmodified pip dependency (docs/04 §3)
     "alembic>=1.13",
     "redis>=5.0",
+    "boto3>=1.34",  # S3-compatible object storage (Cloudflare R2): backups, and uploads next
 ]
 
 [project.optional-dependencies]
