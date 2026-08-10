@@ -14,7 +14,14 @@ from app.db import Base
 from app import settings
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# `%` doubled because set_main_option writes into a ConfigParser, which reads a lone `%`
+# as interpolation syntax and raises. Passwords reach us percent-encoded — a `@` in a
+# password MUST be written `%40` or it terminates the userinfo and the host is parsed
+# wrong — so an encoded password would crash Alembic before it opened a connection.
+# The API image runs `alembic upgrade head` on start, so this failed the container's
+# boot, not just a developer's command. Found against a real managed database whose
+# generated password contained `@`.
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
