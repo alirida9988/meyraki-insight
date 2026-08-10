@@ -1,0 +1,34 @@
+# Meyraki Insight — Cloudflare Tunnel ingress.
+#
+# Locally-managed on purpose: the routing lives in this file rather than in the dashboard,
+# so it is reviewable, diffable, and reproducible on another machine. The dashboard's
+# Public Hostnames screen does the same job through a UI.
+#
+# The tunnel dials OUT to Cloudflare and holds the connection open, so nothing listens on
+# a public interface and no port is forwarded. There is no inbound surface to scan.
+
+tunnel: <your tunnel id — `cloudflared tunnel list`>
+credentials-file: ${HOME}/.cloudflared/meyraki.json
+
+# Reports are large and analyses are slow: a full run makes several model calls and the
+# PDF is a few megabytes, so the default proxy timeouts would cut a client off mid-report.
+originRequest:
+  connectTimeout: 30s
+  # A full analysis can take three minutes; the browser polls, but the report download
+  # itself is a single long response.
+  noTLSVerify: false
+
+ingress:
+  - hostname: api.totalkapp.com
+    service: http://localhost:8000
+    originRequest:
+      connectTimeout: 30s
+
+  - hostname: app.totalkapp.com
+    service: http://localhost:3000
+    originRequest:
+      connectTimeout: 30s
+
+  # Anything else that resolves here gets a flat refusal rather than being quietly routed
+  # somewhere it was not meant to go.
+  - service: http_status:404
