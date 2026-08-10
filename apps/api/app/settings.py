@@ -61,3 +61,22 @@ def agents_enabled() -> bool:
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 FLOORPLAN_TYPES = {"image/png", "image/jpeg", "application/pdf"}
 FLOORPLAN_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"%PDF-")
+
+
+# Registration allowlist. Empty means open signup, which is correct for development and
+# dangerous the moment a deployment has a public URL: every stranger who signs up spends
+# the owner's model credits, roughly $0.25 per analysis. Comma-separated, case-insensitive.
+ALLOWED_EMAILS = frozenset(
+    e.strip().lower()
+    for e in os.environ.get("MEYRAKI_ALLOWED_EMAILS", "").split(",")
+    if e.strip()
+)
+
+
+def registration_allowed(email: str) -> bool:
+    """True when this address may create an account.
+
+    Gates registration only, never login: adding the list later must not lock existing
+    users out of data they already own.
+    """
+    return not ALLOWED_EMAILS or email.strip().lower() in ALLOWED_EMAILS

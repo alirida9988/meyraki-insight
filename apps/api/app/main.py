@@ -83,6 +83,17 @@ class LoginIn(BaseModel):
 @app.post("/auth/register", status_code=201)
 def register(body: RegisterIn, response: Response, session: Session = Depends(get_session)) -> dict:
     email = body.email.strip().lower()
+    # A deployment reachable from the internet is a deployment strangers can sign up to,
+    # and every analysis they run spends the owner's model credits. Setting
+    # MEYRAKI_ALLOWED_EMAILS closes registration to a named list; leaving it unset keeps
+    # signup open, which is right for development and wrong the moment a URL is shared.
+    # Only registration is gated — existing accounts keep working, so adding the list
+    # later never locks anyone out of their own data.
+    if not settings.registration_allowed(email):
+        raise HTTPException(
+            403,
+            "This deployment is invitation-only. Ask the owner to add your email address.",
+        )
     if session.scalar(select(User).where(User.email == email)) is not None:
         raise HTTPException(409, "An account with this email already exists — sign in instead.")
     org = Org(name=body.org_name.strip())
