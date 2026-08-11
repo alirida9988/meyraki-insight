@@ -11,7 +11,7 @@ from fastapi.responses import Response, StreamingResponse
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,7 +19,7 @@ from meyraki_contracts import CONTRACT_VERSION, Objective, SpaceType, json_schem
 
 from . import auth as auth_mod
 from . import sharing
-from . import footfall, imaging, ratelimit, settings, storage, version
+from . import billing, footfall, imaging, ratelimit, settings, storage, version
 from .db import SessionLocal, get_session, init_db
 from .models import Analysis, CostEntry, Event, Org, Project, StepRun, Upload, User
 from .pipeline import STEP_NAMES, run_analysis
@@ -171,6 +171,42 @@ def health(response: Response, session: Session = Depends(get_session)) -> dict:
     # `build` is here so a deployed instance can be identified without shell access:
     # "which commit is actually serving this?" is the first question of any incident.
     return {"status": "ok", "contracts": CONTRACT_VERSION, "build": version.build_version()}
+
+
+@app.get("/billing")
+def billing_state(
+    session: Session = Depends(get_session),
+    user: User = Depends(auth_mod.current_user),
+) -> dict:
+    """What this organisation is entitled to, and why.
+
+    Exposed so the interface can say "2 of 3 included analyses left" before a studio
+    uploads a plan, rather than letting them do the work and meet a 402 at the end. The
+    same evaluation the analysis endpoint uses, so the two can never disagree.
+    """
+    org = session.get(Org, user.org_id)
+    used = session.scalar(
+        select(func.count(Analysis.id))
+        .join(Project, Project.id == Analysis.project_id)
+        .where(Project.org_id == user.org_id)
+    ) or 0
+    e = billing.evaluate(
+        plan=org.plan if org else None,
+        subscription_status=org.subscription_status if org else None,
+        credits=org.analysis_credits if org else 0,
+        analyses_used=int(used),
+    )
+    return {
+        "enforced": billing.enabled(),
+        "plan": e.plan,
+        "subscription_status": e.subscription_status,
+        "analyses_used": e.used,
+        "analyses_included": e.included,
+        "analyses_remaining": e.remaining_free,
+        "credits": e.credits,
+        "can_start_analysis": e.allowed,
+        "reason": e.reason,
+    }
 
 
 @app.get("/contracts")
@@ -377,6 +413,25 @@ def start_analysis(
     if active is not None:
         return {"id": active.id, "status": active.status}
 
+    # Checked here rather than at the top of the handler so a retry of an already-running
+    # analysis is neither refused nor billed twice — the fast path above returns first.
+    org = session.get(Org, user.org_id)
+    used = session.scalar(
+        select(func.count(Analysis.id))
+        .join(Project, Project.id == Analysis.project_id)
+        .where(Project.org_id == user.org_id)
+    ) or 0
+    entitlement = billing.evaluate(
+        plan=org.plan if org else None,
+        subscription_status=org.subscription_status if org else None,
+        credits=org.analysis_credits if org else 0,
+        analyses_used=int(used),
+    )
+    if not entitlement.allowed:
+        # 402 rather than 403: this is not a permission the studio lacks, it is a payment
+        # the account has not made, and the message says which and what to do next.
+        raise HTTPException(402, entitlement.reason)
+
     analysis = Analysis(
         project_id=project_id,
         objectives=[o.value for o in body.objectives],
@@ -391,6 +446,12 @@ def start_analysis(
     session.flush()
     for i, name in enumerate(STEP_NAMES):
         session.add(StepRun(analysis_id=analysis.id, position=i, name=name))
+    if billing.consumes_credit(entitlement) and org is not None:
+        # Inside the same transaction as the insert, deliberately. If the commit below
+        # loses the duplicate-request race, the rollback takes the credit back with it —
+        # a studio charged for an analysis that was never created is the one billing bug
+        # they would not forgive, and the race is real enough to have its own index.
+        org.analysis_credits = max(0, org.analysis_credits - 1)
     try:
         session.commit()
     except IntegrityError:

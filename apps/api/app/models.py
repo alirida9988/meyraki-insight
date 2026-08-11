@@ -22,6 +22,18 @@ class Org(Base):
     name: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    # --- billing -----------------------------------------------------------------
+    # Nullable with sane defaults so switching billing on never has to backfill, and so
+    # every organisation that existed before this column keeps working untouched.
+    plan: Mapped[str] = mapped_column(String(20), default="free")
+    # The payment provider's customer id. Not named stripe_* on purpose: which provider
+    # is usable depends on where the selling entity is registered, and a column named
+    # after one of them would have to be migrated to change that decision.
+    billing_customer_id: Mapped[str | None] = mapped_column(String(80), default=None)
+    subscription_status: Mapped[str | None] = mapped_column(String(20), default=None)
+    # One-off purchases, for a studio that wants a single report rather than a plan.
+    analysis_credits: Mapped[int] = mapped_column(Integer, default=0)
+
 
 class User(Base):
     __tablename__ = "users"
