@@ -53,7 +53,20 @@ Implement the 7-step agent pipeline (`01-ARCHITECTURE.md` §2) in order:
 ## Milestone 4 — The report & the business loop (week 7)
 - Branded HTML report template (client logo/name, EN or AR) → Playwright PDF.
 - Report versioning per analysis; download from dashboard.
-- Billing scaffold: Stripe (subscription for studios, one-off per-report checkout).
+- Billing ◐ — the entitlement half is built (`app/billing.py`): a free allowance, one-off
+  analysis credits, subscription state on the org, and a 402 that names the reason and the
+  remedy rather than saying "payment required". An analysis is the unit billed because it
+  is the unit that costs, so the meter and the model spend move together. **Off unless
+  `MEYRAKI_BILLING=on`**, because a half-configured paywall that starts refusing analyses
+  during a client demo is a self-inflicted outage.
+  The checkout half is deliberately NOT built. Which provider is even available depends on
+  where the selling entity is registered — Stripe does not onboard sellers in every country
+  this is launching from — so the decision layer is provider-agnostic (`billing_customer_id`,
+  not `stripe_customer_id`) and the adapter plugs in when that is settled.
+  **Founder decision 2026-08-11: pilots are invoiced by agreement, not by checkout.**
+  Entitlement is granted with `python -m app.grant` inside the API container: no admin role
+  and no privileged endpoint, therefore no new way in for anyone not already on the host.
+  Revisit when self-serve signup matters more than learning what studios will pay for.
 - **Exit:** end-to-end: upload → analyze → moodboard → **client-ready branded PDF** →
   paid. This is the complete MVP loop from the decks.
 
