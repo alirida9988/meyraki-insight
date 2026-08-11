@@ -429,25 +429,52 @@ def test_a_billed_call_is_recorded_even_when_its_output_is_rejected(monkeypatch,
     elif outcome == "unparseable":
         response.parsed_output = None
 
+    def _maybe_raise():
+        if outcome == "validation_error":
+            class _T(pydantic.BaseModel):
+                x: int
+
+            _T.model_validate_json('{"x": ')
+
+    class _Stream:
+        """The streamed path returns the same ParsedMessage from a context manager."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get_final_message(self):
+            _maybe_raise()
+            return response
+
     class _Messages:
         def parse(self, **kwargs):
-            if outcome == "validation_error":
-                class _T(pydantic.BaseModel):
-                    x: int
-
-                _T.model_validate_json('{"x": ')
+            _maybe_raise()
             return response
+
+        def stream(self, **kwargs):
+            return _Stream()
 
     monkeypatch.setattr(settings, "agents_enabled", lambda: True)
     monkeypatch.setattr(agents, "client", lambda: type("C", (), {"messages": _Messages()})())
 
-    token = costs.start_ledger()
-    try:
-        with pytest.raises(Exception):
-            agents._parse("claude-opus-5", 16_000, [], agents.WireZoneGraph, step="layout")
-        assert costs.spent_usd() > 0, f"{outcome} was billed but recorded $0"
-    finally:
-        costs.stop_ledger(token)
+    # Both transports, because the three biggest steps stream and the small ones do not.
+    # Only the streamed path was uncovered when streaming was introduced, and the gap
+    # showed up as this test failing rather than as a silent hole — a call that is billed
+    # and then rejected must record its spend whichever way it was sent.
+    for budget, transport in ((16_000, "streamed"), (4_096, "non-streaming")):
+        assert (budget >= agents.STREAM_ABOVE_TOKENS) == (transport == "streamed")
+        token = costs.start_ledger()
+        try:
+            with pytest.raises(Exception):
+                agents._parse("claude-opus-5", budget, [], agents.WireZoneGraph, step="layout")
+            assert costs.spent_usd() > 0, (
+                f"{outcome} on the {transport} path was billed but recorded $0"
+            )
+        finally:
+            costs.stop_ledger(token)
 
 
 def test_a_provider_without_usage_leaves_a_visible_marker_not_a_silent_zero():
@@ -461,6 +488,9 @@ def test_a_provider_without_usage_leaves_a_visible_marker_not_a_silent_zero():
     class _Messages:
         def parse(self, **kwargs):
             return _Response()
+
+        def stream(self, **kwargs):  # unused at this budget; present so the fake is whole
+            raise AssertionError("a 100-token budget must not be streamed")
 
     import pytest as _pytest
 

@@ -11,6 +11,7 @@ import pydantic
 from pydantic import BaseModel, Field
 
 from meyraki_contracts import (
+    BACK_OF_HOUSE,
     SCORE_EXCLUDED,
     FlowReport,
     FootfallStatus,
@@ -46,6 +47,13 @@ def client() -> anthropic.Anthropic:
     return _client
 
 
+# Above this budget a call is streamed. The SDK refuses a non-streaming request whose
+# max_tokens implies over ten minutes of generation (21333 tokens at the time of writing),
+# and the dense-plan steps need more than that. Below it, a plain call keeps the code path
+# simpler for the small, fast steps.
+STREAM_ABOVE_TOKENS = 8000
+
+
 class AgentRefusal(RuntimeError):
     """The model declined the request — surfaced as a failed step, never silence."""
 
@@ -79,12 +87,28 @@ def _parse(model: str, max_tokens: int, content: list, output_format: type[BaseM
             "or no API key) — the offline suite must never reach the network"
         )
     try:
-        response = client().messages.parse(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": content}],
-            output_format=output_format,
-        )
+        if max_tokens >= STREAM_ABOVE_TOKENS:
+            # Streaming is not an optimisation here, it is the only way a large answer can
+            # be requested at all: the SDK refuses a non-streaming call whose max_tokens
+            # implies more than ten minutes of generation, which caps it at 21333. A
+            # 43-room hotel guest floor does not fit in that, and the ceiling was reached
+            # by an honest plan rather than a runaway. A streamed call returns the same
+            # ParsedMessage — parsed_output, usage and stop_reason all present — so every
+            # guard below is unchanged.
+            with client().messages.stream(
+                model=model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": content}],
+                output_format=output_format,
+            ) as stream:
+                response = stream.get_final_message()
+        else:
+            response = client().messages.parse(
+                model=model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": content}],
+                output_format=output_format,
+            )
     except pydantic.ValidationError as exc:
         # Billed and thrown away. A truncated response consumed the full output budget,
         # so book the worst case rather than $0 — this is precisely the runaway the
@@ -184,6 +208,10 @@ class WireZone(BaseModel):
     label: str = Field(description="display name as written on the plan, or a natural name")
     polygon: list[WirePoint] = Field(description="outline in normalized 0-1 coordinates, 4+ points")
     confidence: float
+    staff_only: bool = Field(
+        False,
+        description="true if only staff enter this room, false if guests can",
+    )
 
 
 class WireAdjacency(BaseModel):
@@ -202,8 +230,12 @@ hospitality interiors. Map every functional zone in the attached floorplan.
 
 Rules:
 - Coordinates are normalized: (0,0) is the top-left of the image, (1,1) bottom-right.
-- Trace each zone's polygon tightly along its walls — follow the actual room shape,
-  not a loose bounding box. Use 4-12 points per polygon.
+- Trace each zone's polygon along its walls, not as a loose bounding box, and use the
+  FEWEST points that describe the shape. A rectangular room takes EXACTLY 4 points — most
+  hotel and restaurant rooms are rectangles, so 4 is the normal answer, not the minimum.
+  Use 5-8 only for an L-shape or a genuine curve, and never more than 8. A dense floor of
+  forty rooms has to fit in one response: extra points on a rectangle buy no accuracy and
+  spend the budget the rest of the plan needs.
 - category must be one of: {", ".join(c.value for c in ZoneCategory)}.
 - Use labels written on the plan when present (any language); otherwise name the zone
   by its evident function (furniture, fixtures).
@@ -213,6 +245,13 @@ Rules:
   guestroom — a hotel room, a suite, a bedroom with an ensuite off a corridor of like
   rooms; its private bathroom is part of the guestroom, not a separate restroom. Use
   "other" only when the function genuinely cannot be determined.
+- staff_only says WHO may enter, which is a separate question from what the room is for.
+  A staff canteen is still dining and a service corridor is still a corridor — mark them
+  staff_only rather than mistyping them. Set it true for anything a guest never enters:
+  staff canteens and locker rooms, offices and switchboard rooms, service corridors and
+  stairs, plant and boiler rooms, kitchens and their stores, laundries, refuse and linen
+  rooms, service entrances. Set it false for anything a guest can walk into, including
+  the rooms they only pass through.
 - adjacency lists pairs of zones connected by a door or open passage.
 - entrances lists zones with a door to the outside of the building.
 - Cover the full walkable floor area; skip wall voids and shafts.
@@ -230,7 +269,14 @@ Rules:
 # test_agent_budgets_stay_within_the_sdks_non_streaming_limit guards it offline.
 # A multi-plate architect's sheet is handled by scoping the prompt to one floor plate,
 # which is the real fix; more tokens would only have bought a meaningless answer.
-ZONES_MAX_TOKENS = 16000
+# Raised from 16000 on 2026-08-11. Adding one boolean per zone (staff_only) tipped the
+# two densest plans in the benchmark — a 43-room guest floor and a 30-room service
+# basement — past the ceiling, and a truncated response surfaces as "EOF while parsing"
+# naming the schema rather than the budget. 20000 sits under the SDK's non-streaming
+# limit of 21333, above which it refuses the request outright; the guard in
+# test_agents.py checks that against the SDK's own calculation rather than a copied
+# number, so it stays true if the threshold moves.
+ZONES_MAX_TOKENS = 32000
 
 
 def run_zones(plan_bytes: bytes) -> ZoneGraph:
@@ -281,6 +327,10 @@ def repair_zone_graph(wire: WireZoneGraph) -> ZoneGraph:
                 label=wz.label.strip() or zid,
                 polygon=points,
                 confidence=min(1.0, max(0.0, wz.confidence)),
+                # Back-of-house categories are staff-only by definition, so the flag is
+                # forced rather than trusted: a kitchen the analyst forgot to mark would
+                # otherwise be scored as guest space on the strength of an omission.
+                staff_only=bool(wz.staff_only) or category in BACK_OF_HOUSE,
             )
         )
 

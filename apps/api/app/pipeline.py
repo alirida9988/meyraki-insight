@@ -30,6 +30,7 @@ from meyraki_contracts import (
     QAVerdict,
     ReportArtifact,
     SCORE_EXCLUDED,
+    is_guest_facing,
     Scenario,
     StepBudget,
     Track,
@@ -307,7 +308,7 @@ def flow_efficiency_score(graph: ZoneGraph, flow: FlowReport) -> float | None:
     from .geometry import polygon_area
 
     intensity = {f.zone_id: f.intensity for f in flow.zone_flows}
-    scored = [z for z in graph.zones if z.category not in SCORE_EXCLUDED]
+    scored = [z for z in graph.zones if is_guest_facing(z)]
     if not scored:
         return None  # nothing guest-facing on this plan; a note explains it
     peak = max((intensity.get(z.id, 0.0) for z in scored), default=0.0)
@@ -329,11 +330,14 @@ def step_business(ctx: Ctx) -> BusinessCase:
     flow = FlowReport.model_validate(ctx.outputs["flow"])
     score = flow_efficiency_score(graph, flow)
     excluded = ", ".join(sorted(c.value for c in SCORE_EXCLUDED))
+    staff_rooms = sum(1 for z in graph.zones if z.staff_only)
     assumptions = [
         Assumption(
             statement="Flow Efficiency Score = area-weighted mean flow intensity across "
             "guest-facing zones, measured relative to the busiest guest-facing zone and "
-            f"scaled to 0-100. Excluded zone types: {excluded}.",
+            f"scaled to 0-100. Excluded zone types: {excluded}."
+            + (f" Also excluded: {staff_rooms} staff-only room(s), which guests cannot enter."
+               if staff_rooms else ""),
             source="deterministic",
         ),
         Assumption(
@@ -362,7 +366,16 @@ def step_business(ctx: Ctx) -> BusinessCase:
         # nothing to measure. Telling that client "no guest-facing zone" would be plainly
         # false — they are looking at a floor full of guest rooms — so the note names the
         # reason it actually applies.
+        staff = sum(1 for z in graph.zones if z.staff_only)
         rooms = sum(1 for z in graph.zones if z.category is ZoneCategory.GUESTROOM)
+        if staff and not rooms:
+            _emit(
+                ctx.session, ctx.analysis.id, "step",
+                f"Flow Efficiency Score not computed: all {staff} zone(s) on this plate are "
+                "staff-only, so there is no guest circulation to measure. This looks like a "
+                "back-of-house floor.",
+            )
+            return BusinessCase(flow_efficiency_score=score, assumptions=assumptions)
         reason = (
             f"every scored zone is excluded — this plate is {rooms} guest "
             "room(s) plus circulation, and guest rooms are private destinations that "

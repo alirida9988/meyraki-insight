@@ -11,7 +11,7 @@ import io
 import unicodedata
 from collections import deque
 
-from meyraki_contracts import SCORE_EXCLUDED, FlowReport, Track, ZoneFlow, ZoneGraph
+from meyraki_contracts import FlowReport, Track, ZoneFlow, ZoneGraph, is_guest_facing
 
 BOTTLENECK_AT = 0.8
 DEAD_ZONE_AT = 0.2
@@ -118,7 +118,7 @@ def _report(
     # briefed to cite them as opportunities. A back-of-house or utility zone sitting
     # at zero is doing its job, so it must not reach that list — but it stays in
     # zone_flows, because the heatmap draws every zone.
-    advisable = {z.id for z in graph.zones if z.category not in SCORE_EXCLUDED} if graph else None
+    advisable = {z.id for z in graph.zones if is_guest_facing(z)} if graph else None
     return FlowReport(
         track=track,
         zone_flows=flows,

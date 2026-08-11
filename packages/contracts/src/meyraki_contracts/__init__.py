@@ -83,7 +83,22 @@ guest floor it would dominate the score by area and drown out the circulation it
 supposed to measure. So it attracts guests fully and scores not at all."""
 
 SCORE_EXCLUDED: frozenset[ZoneCategory] = BACK_OF_HOUSE | UTILITY_ZONES | PRIVATE_DESTINATIONS
-"""Excluded from the Flow Efficiency Score. Named in the report's assumptions."""
+"""Excluded from the Flow Efficiency Score by CATEGORY. Named in the report's assumptions.
+
+Not sufficient on its own — see `is_guest_facing`, which also honours `Zone.staff_only`.
+"""
+
+
+def is_guest_facing(zone: "Zone") -> bool:
+    """Whether a guest can be in this room, which is what the score is about.
+
+    Two independent reasons a room is not guest space: what it is for (a kitchen, a lift
+    core) and who is allowed in it (a staff canteen). Category answers only the first, so
+    anything deciding "does this count as guest space" must ask here rather than testing
+    SCORE_EXCLUDED directly — a hotel basement is entirely staff space and almost none of
+    it is back-of-house by category.
+    """
+    return not zone.staff_only and zone.category not in SCORE_EXCLUDED
 
 
 # ---------------------------------------------------------------- step 1: intake
@@ -152,6 +167,20 @@ class Zone(BaseModel):
     polygon: list[Point] = Field(min_length=3)
     area_sqm: float | None = Field(None, gt=0)
     confidence: float = Field(ge=0, le=1)
+    staff_only: bool = False
+    """Who may enter, which is orthogonal to what the room is for.
+
+    Added 2026-08-11 after a real hotel basement was analysed. Category describes
+    function and had no way to say audience, so a staff canteen was correctly typed
+    `dining`, an engineers' office `workspace` and a service corridor `corridor` — and all
+    three were then scored as guest space. The result was a confident flow-efficiency
+    number computed over rooms no guest can enter.
+
+    A flag rather than new categories, because a staff canteen genuinely is dining: adding
+    STAFF_DINING, STAFF_LOCKER and STAFF_CORRIDOR would duplicate the function axis for
+    every value it already has. Defaults to False, so a plan whose analyst says nothing
+    behaves exactly as before.
+    """
 
 
 class ZoneGraph(BaseModel):

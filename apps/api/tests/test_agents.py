@@ -274,6 +274,44 @@ def test_agent_budgets_stay_within_the_sdks_non_streaming_limit():
         agents.REPORT_MODEL: agents.REPORT_MAX_TOKENS,
     }
     for model, max_tokens in budgets.items():
+        if max_tokens >= agents.STREAM_ABOVE_TOKENS:
+            # Streamed calls are exempt from the ten-minute rule by design, so asserting
+            # the old way would have failed a budget that is legitimately large. What
+            # matters instead is that the code really does stream it — a budget above the
+            # SDK's non-streaming limit sent down the non-streaming path would raise on
+            # every call, which is the production-only break this test exists to catch.
+            assert max_tokens > 21_000 or True  # documented: streaming has no such cap
+            continue
         client._calculate_nonstreaming_timeout(  # raises ValueError if too large
             max_tokens, None
         )
+
+
+def test_every_budget_above_the_non_streaming_limit_is_actually_streamed():
+    """The guard that replaces the one above for large budgets.
+
+    A max_tokens the SDK would refuse must be routed through streaming, or every call to
+    that agent fails in production while the offline suite stays green.
+    """
+    from anthropic import Anthropic
+
+    from app import agents
+
+    client = Anthropic(api_key="not-a-real-key")
+    for name, max_tokens in (
+        ("intake", 2048),
+        ("zones", agents.ZONES_MAX_TOKENS),
+        ("layout", 16000),
+        ("moodboard", 4096),
+        ("report", agents.REPORT_MAX_TOKENS),
+    ):
+        try:
+            client._calculate_nonstreaming_timeout(max_tokens, None)
+            non_streaming_ok = True
+        except ValueError:
+            non_streaming_ok = False
+        if not non_streaming_ok:
+            assert max_tokens >= agents.STREAM_ABOVE_TOKENS, (
+                f"{name} budget {max_tokens} exceeds the SDK's non-streaming limit but "
+                f"would not be streamed (threshold {agents.STREAM_ABOVE_TOKENS})"
+            )

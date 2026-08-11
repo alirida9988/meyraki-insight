@@ -141,12 +141,20 @@ def simulate(graph: ZoneGraph) -> Outcome:
         if not journeys:
             return None, [], "no walkable route was found between the entrance and any zone"
 
-        weights = [
-            ATTRACTION.get(
-                next((z.category for z in graph.zones if z.id == zid), ZoneCategory.OTHER), 1.0
-            )
-            for zid in destinations[: len(journeys)]
-        ]
+        # A staff canteen is dining, and no guest will ever walk to it. Weighting by
+        # category alone sent simulated guests into the back of house on a plan that
+        # labelled its service rooms honestly.
+        by_id = {z.id: z for z in graph.zones}
+
+        def _weight(zid: str) -> float:
+            zone = by_id.get(zid)
+            if zone is None:
+                return 1.0
+            if zone.staff_only:
+                return 0.0
+            return ATTRACTION.get(zone.category, 1.0)
+
+        weights = [_weight(zid) for zid in destinations[: len(journeys)]]
         total_weight = sum(weights) or 1.0
 
         # Spawn guests at the entrance, spread over its area to avoid overlap.
