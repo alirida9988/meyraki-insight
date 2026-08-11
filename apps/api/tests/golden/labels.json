@@ -99,5 +99,20 @@
     "expect_entrance": true,
     "max_unclassified": 4,
     "note": "Same source and licence as park_lane_ground.png, and THE PLAN CLASS THE BENCHMARK NEVER HAD: a typical guest-room floor, roughly twenty bedrooms with ensuites off double-loaded corridors around a light well. This is the exact shape that exposed the missing `guestroom` category on 2026-08-08 — before that fix every room here landed in `other` and drew the flow simulation's default attraction of 1.0 against dining's 5.0, so the simulation routed guests away from the only real destination on the floor. `guestroom` is required for the same reason `retail` is required on the Blackstone: it is the check that fails loudly if the category is ever dropped. Note on `expect_entrance`: a typical floor has no door to the street, and what the analyst marks is the lift and stair arrival point. That is the correct answer for flow purposes — it is where guests enter the floor — but it is why the flow step reports falling back to distance decay here, which the report discloses. Observed variance, recorded rather than hidden: two benchmark runs of the identical file on identical code read 33 zones and then 43. The categorical checks were stable across both — guestroom, corridor and the entrance were found every time — so what moves is how finely the analyst subdivides a repetitive bedroom floor, chiefly whether an ensuite is folded into its room or split out. The range is therefore set to catch GROSS failure (a handful of zones, or a hundred) and not to pin an exact count, because on a forty-room plan an exact count is not a property a vision model can be held to. Tightening it would produce a benchmark that cries wolf, and a check that fails at random is worse than no check, because the next real failure gets re-run instead of read."
+  },
+  "commodore_perry_basement.png": {
+    "quality": "ok",
+    "zone_count": [
+      14,
+      44
+    ],
+    "required_categories": [
+      "kitchen",
+      "storage",
+      "service"
+    ],
+    "expect_entrance": true,
+    "max_unclassified": 6,
+    "note": "Commodore Perry Hotel, Toledo (Hotel Monthly, Vol 35 No 411, June 1927). Public domain, verified through the Wikimedia Commons API: LicenseShortName 'Public domain', Restrictions none. Same trade-press family as the Park Lane pair.\n\nTHE BACK-OF-HOUSE PLAN THE BENCHMARK LACKED. Every other plan in this set is a public floor; this is a hotel basement and nothing else — kitchen, kitchen stores, cold rooms for fruit, dairy, delicatessen and meat, laundry, steward's office, staff cafeterias and locker rooms, boiler and machinery plant, garbage sorting, soiled linen. It is the densest labelled service floor found anywhere, and it is why `kitchen`, `storage` and `service` are required here and nowhere else.\n\nKNOWN LIMITATION THIS PLAN MAKES VISIBLE, recorded rather than hidden: the flow-efficiency score decides guest-facing by category, and category is function, not audience. On this floor the staff cafeterias read as `dining`, the engineers' and switchboard rooms as `workspace`, the service hall as `corridor` and the areaway as `entrance` — all correct descriptions, all scored as though guests used them. A studio uploading a service floor would get a plausible number computed over staff space. Fixing it needs a staff-versus-guest distinction in the taxonomy, which is a product decision rather than a bug fix, so the labels here assert only what the drawing states and this note carries the rest. The zone range is wide because a forty-room service floor is exactly where a vision model's subdivision varies most."
   }
 }

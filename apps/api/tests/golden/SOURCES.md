@@ -73,6 +73,54 @@ servery, coldrooms, staff changing. The *page* is public for statutory consultat
 this directory unless permission is obtained in writing. This is the same reasoning that
 excluded CubiCasa5K and FloorPlanCAD, applied consistently.
 
+## Round 3 — the back-of-house gap, closed (2026-08-11)
+
+Every plan here was a public floor. None had a kitchen line, a cold room, a servery or
+staff circulation — the half of a hospitality building where flow analysis earns its money.
+
+**Commodore Perry Hotel, Toledo** — `commodore_perry_basement.png`, from *Hotel Monthly*
+Vol 35 No 411, June 1927. Public domain, verified through the Commons `imageinfo` API the
+same way as the Park Lane pair: `LicenseShortName: Public domain`, `Restrictions: none`.
+
+It is a hotel basement and nothing else, and it is densely labelled: kitchen, kitchen
+stores, separate cold rooms for fruit, dairy, delicatessen and meat, laundry, steward's
+office, staff cafeterias and locker rooms, boiler and machinery plant, garbage sorting,
+soiled linen, ice storage. `kitchen`, `storage` and `service` are required categories on
+this plan and no other.
+
+### What it revealed, which is worth more than the coverage
+
+The flow-efficiency score decides *guest-facing* by category, and a category describes
+function, not audience. On this floor the staff cafeterias are correctly read as `dining`,
+the engineers' and switchboard rooms as `workspace`, the service hall as `corridor`, and
+the service areaway as `entrance` — every label right, and thirteen of them scored as
+though guests used them. A studio uploading a service floor would receive a plausible
+number computed over staff space, which is the dangerous kind of wrong.
+
+Recorded rather than quietly fixed: separating staff from guest needs a distinction in the
+taxonomy that does not exist yet, and that is a product decision rather than a bug fix.
+The label file asserts only what the drawing prints; the note carries the finding.
+
+### Evaluated and rejected this round
+
+- **HABS measured drawings** (Fraunces Tavern, NYC; Tavern-Store-Kitchen, Madison VA;
+  Balboa Park House of Hospitality). Library of Congress, unambiguous public domain, and
+  genuinely large — 14,000 px sheets of real hospitality buildings. **Not committed:** a
+  Historic American Buildings Survey records historic *fabric*, so the rooms carry notes
+  like "wall installed c.1840" and "fireplace inaccessible" and are not named by function
+  at all. Any category asserted about them would be our guess dressed as ground truth,
+  which is the one thing a benchmark must never contain. Useful one day as an
+  *unlabelled-plan* case, scored on inference rather than transcription.
+- **Camden Council planning portal** (a Primrose Hill pub-restaurant and a Chalton Street
+  restaurant, both with full labelled back-of-house — cellars, walk-ins, servery,
+  coldrooms, staff changing). Permission to use them was granted by the architect
+  verbally, relayed by the founder on 2026-08-11, with written confirmation to follow.
+  **Not committed for a different reason:** `camdocs.camden.gov.uk` resolves but refuses
+  every connection from this machine, and the council's main site returns 403 to
+  automated clients. Permission does not help when the host will not talk to you. If they
+  are still wanted, they must be downloaded through a browser and dropped in; the
+  licensing question is settled, only the retrieval is not.
+
 ## The gap only real plans can close
 
 **No open Arabic or MENA floorplan dataset exists.** Arabic *reports* are tested end to
